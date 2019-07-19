@@ -114,16 +114,16 @@ RUN apk update && \
 
 WORKDIR /opt/tinode
 
-# Copy config template to the container.
-COPY config.template .
-COPY entrypoint.sh .
-
 # Get the desired Tinode build.
-ADD https://github.com/tinode/chat/releases/download/v$BINVERS/tinode-$TARGET_DB.linux-amd64.tar.gz .
+ADD ./releases/$VERSION/tinode-$TARGET_DB.linux-amd64.tar.gz .
 
 # Unpack the Tinode archive.
 RUN tar -xzf tinode-$TARGET_DB.linux-amd64.tar.gz \
 	&& rm tinode-$TARGET_DB.linux-amd64.tar.gz
+
+# Copy config template to the container.
+COPY config.template .
+COPY entrypoint.sh .
 
 # Create directory for chatbot data.
 RUN mkdir /botdata
@@ -135,5 +135,5 @@ RUN chmod +x credentials.sh
 # Generate config from template and run the server.
 ENTRYPOINT ./entrypoint.sh
 
-# HTTP, gRPC, cluster ports
-EXPOSE 6060 16060 12000-12003
+# HTTP and gRPC ports
+EXPOSE 18080 16061
