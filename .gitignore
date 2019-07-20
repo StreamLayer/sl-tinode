@@ -1,1 +1,2 @@
 ./docker/tinode/releases/*
+*.gz
