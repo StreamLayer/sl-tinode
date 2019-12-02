@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -ex
 
 ### builds custom image for makeomatic purposes
 # usage "./build-custom.sh tag=v0.15.9"
@@ -24,11 +26,15 @@ fi
 echo "Releasing $version"
 
 GOSRC=${GOPATH}/src/github.com/tinode
-
+git submodule update --init --recursive
 
 # Prepare directory for the new release
 rm -fR ${releasepath}/${version}
-mkdir ${releasepath}/${version}
+mkdir -p ${releasepath}/${version}
+
+if [[ ! -x "$GOPATH/bin/gox" ]]; then
+  go get github.com/mitchellh/gox
+fi
 
 for plat in "${goplat[@]}"
 do
@@ -38,7 +44,7 @@ do
     # Remove previous build
     rm -f $GOPATH/bin/keygen
     # Build
-    ~/go/bin/gox -osarch="${plat}/${arc}" -ldflags "-s -w" -output $GOPATH/bin/keygen ./keygen > /dev/null
+    $GOPATH/bin/gox -osarch="${plat}/${arc}" -ldflags "-s -w" -output $GOPATH/bin/keygen ./keygen > /dev/null
 
     for dbtag in "${dbtags[@]}"
     do
@@ -49,10 +55,10 @@ do
       rm -f $GOPATH/bin/tinode
       rm -f $GOPATH/bin/init-db
       # Build tinode server and database initializer for RethinkDb and MySQL.
-      ~/go/bin/gox -osarch="${plat}/${arc}" \
+      $GOPATH/bin/gox -osarch="${plat}/${arc}" \
         -ldflags "-s -w -X main.buildstamp=`git describe --tags`" \
         -tags ${dbtag} -output $GOPATH/bin/tinode ./server > /dev/null
-      ~/go/bin/gox -osarch="${plat}/${arc}" \
+      $GOPATH/bin/gox -osarch="${plat}/${arc}" \
         -ldflags "-s -w" \
         -tags ${dbtag} -output $GOPATH/bin/init-db ./tinode-db > /dev/null
 
