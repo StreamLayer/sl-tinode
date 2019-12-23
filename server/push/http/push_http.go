@@ -78,7 +78,7 @@ func messagePayload(payload *push.Payload) map[string]string {
 	data := make(map[string]string)
 	data["topic"] = t.ParseUserId(payload.Topic).String()
 	data["from"] = t.ParseUserId(payload.From).String()
-	data["ts"] = payload.Timestamp.Format(time.RFC3339Nano)
+	data["ts"] = payload.Timestamp.Format(time.RFC3339)
 	data["seq"] = strconv.Itoa(payload.SeqId)
 	data["mime"] = payload.ContentType
 	data["content"], _ = drafty.ToPlainText(payload.Content)
