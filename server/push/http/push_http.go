@@ -71,6 +71,7 @@ func (httpPush) Init(jsonconf string) error {
 		}
 	}()
 
+	log.Printf("Initialized HTTP push")
 	return nil
 }
 
@@ -87,6 +88,8 @@ func messagePayload(payload *push.Payload) map[string]string {
 }
 
 func sendPushToHttp(msg *push.Receipt, url string) {
+	log.Print("Prepare to sent HTTP push from: ", msg.Payload.From)
+
 	recipientsIds := make([]t.Uid, len(msg.To))
 	for recipientId := range msg.To {
 		recipientsIds = append(recipientsIds, recipientId)
@@ -124,6 +127,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	/*
 	* Send push through http
 	*/
+	log.Print("Sent HTTP push from: ", sender.Id, "to: ", recipientsIds)
 	_, err := http.Post(url, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
 		log.Fatal("Http send push failed: ", err)
