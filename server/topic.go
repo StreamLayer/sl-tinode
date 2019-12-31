@@ -2725,6 +2725,7 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receip
 			Timestamp:   data.Timestamp,
 			SeqId:       data.SeqId,
 			ContentType: contentType,
+			Head:      data.Head,
 			Content:     data.Content}}
 
 	for uid, pud := range t.perUser {
