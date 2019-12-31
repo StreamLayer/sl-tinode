@@ -62,6 +62,8 @@ type Payload struct {
 	// Access mode when notifying of new subscriptions.
 	ModeWant  t.AccessMode `json:"want,omitempty"`
 	ModeGiven t.AccessMode `json:"given,omitempty"`
+	// Message head with custom parameters
+	Head map[string]interface{} `json:"head,omitempty"`
 }
 
 // Handler is an interface which must be implemented by handlers.
