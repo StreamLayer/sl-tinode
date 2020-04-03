@@ -44,6 +44,7 @@ type Topic struct {
 	// 2. route replies from the master to sessions.
 	// 3. disconnect sessions at master's request.
 	// 4. shut down the topic at master's request.
+	// 5. aggregate access permissions on behalf of attached sessions.
 	isProxy bool
 
 	// Time when the topic was first created.
@@ -99,7 +100,7 @@ type Topic struct {
 	// Channel to terminate topic  -- either the topic is deleted or system is being shut down. Buffered = 1.
 	exit chan *shutDown
 
-	// Flag which tells topic lifecycle status: ready, suspended, marked for deletion.
+	// Flag which tells topic lifecycle status: new, ready, paused, marked for deletion.
 	status int32
 }
 
@@ -188,7 +189,7 @@ func (t *Topic) run(hub *Hub) {
 		case sreg := <-t.reg:
 			// Request to add a connection to this topic
 
-			if !t.isActive() {
+			if t.isInactive() {
 				asUid := types.ParseUserId(sreg.pkt.from)
 				sreg.sess.queueOut(ErrLocked(sreg.pkt.id, t.original(asUid), types.TimeNow()))
 			} else {
@@ -215,7 +216,7 @@ func (t *Topic) run(hub *Hub) {
 			// userId.IsZero() == true when the entire session is being dropped.
 			asUid := leave.userId
 
-			if !t.isActive() {
+			if t.isInactive() {
 				if !asUid.IsZero() && leave.id != "" {
 					leave.sess.queueOut(ErrLocked(leave.id, t.original(asUid), now))
 				}
@@ -283,8 +284,12 @@ func (t *Topic) run(hub *Hub) {
 			var pushRcpt *push.Receipt
 			asUid := types.ParseUserId(msg.from)
 			if msg.Data != nil {
-				if !t.isActive() {
+				if t.isInactive() {
 					msg.sess.queueOut(ErrLocked(msg.id, t.original(asUid), msg.timestamp))
+					continue
+				}
+				if t.isReadOnly() {
+					msg.sess.queueOut(ErrPermissionDenied(msg.id, t.original(asUid), msg.timestamp))
 					continue
 				}
 
@@ -328,7 +333,7 @@ func (t *Topic) run(hub *Hub) {
 					msg.sess.queueOut(reply)
 				}
 
-				pushRcpt = t.makePushReceipt(from, msg.Data)
+				pushRcpt = t.pushForData(from, msg.Data)
 
 				// Message sent: notify offline 'R' subscrbers on 'me'
 				t.presSubsOffline("msg", &presParams{seqID: t.lastID, actor: msg.Data.From},
@@ -338,8 +343,8 @@ func (t *Topic) run(hub *Hub) {
 				pluginMessage(msg.Data, plgActCreate)
 
 			} else if msg.Pres != nil {
-				if !t.isActive() {
-					// Ignore presence update - topic is being deleted
+				if t.isInactive() {
+					// Ignore presence update - topic is paused or being deleted
 					continue
 				}
 
@@ -352,8 +357,8 @@ func (t *Topic) run(hub *Hub) {
 				// "what" may have changed, i.e. unset or "+command" removed ("on+en" -> "on")
 				msg.Pres.What = what
 			} else if msg.Info != nil {
-				if !t.isActive() {
-					// Ignore info messages - topic is being deleted
+				if t.isInactive() {
+					// Ignore info messages - topic is paused or being deleted
 					continue
 				}
 
@@ -366,7 +371,7 @@ func (t *Topic) run(hub *Hub) {
 				pud := t.perUser[from]
 
 				// Filter out "kp" from users with no 'W' permission (or people without a subscription)
-				if msg.Info.What == "kp" && !(pud.modeGiven & pud.modeWant).IsWriter() {
+				if msg.Info.What == "kp" && (!(pud.modeGiven & pud.modeWant).IsWriter() || t.isReadOnly()) {
 					continue
 				}
 
@@ -595,7 +600,7 @@ func (t *Topic) run(hub *Hub) {
 
 		case <-defrNotifTimer.C:
 			// Handle deferred presence notifications from a successful service (background) subscription.
-			if !t.isActive() {
+			if t.isInactive() {
 				continue
 			}
 
@@ -675,38 +680,6 @@ func (t *Topic) run(hub *Hub) {
 			return
 		}
 	}
-}
-
-// loadSubscribers loads topic subscribers, sets topic owner.
-func (t *Topic) loadSubscribers() error {
-	subs, err := store.Topics.GetSubs(t.name, nil)
-	if err != nil {
-		return err
-	}
-
-	if subs == nil {
-		return nil
-	}
-
-	for i := range subs {
-		sub := &subs[i]
-		uid := types.ParseUid(sub.User)
-		t.perUser[uid] = perUserData{
-			created:   sub.CreatedAt,
-			updated:   sub.UpdatedAt,
-			delID:     sub.DelId,
-			readID:    sub.ReadSeqId,
-			recvID:    sub.RecvSeqId,
-			private:   sub.Private,
-			modeWant:  sub.ModeWant,
-			modeGiven: sub.ModeGiven}
-
-		if (sub.ModeGiven & sub.ModeWant).IsOwner() {
-			t.owner = uid
-		}
-	}
-
-	return nil
 }
 
 // Session subscribed to a topic, created == true if topic was just created and {pres} needs to be announced
@@ -1082,28 +1055,28 @@ func (t *Topic) requestSub(h *Hub, sess *Session, asUid types.Uid, asLvl auth.Le
 				// Ownership transfer
 				ownerChange = modeWant.IsOwner() && !userData.modeWant.IsOwner()
 
-				// The owner should be able to grant himself any access permissions
-				// If ownership transfer is rejected don't upgrade
+				// The owner should be able to grant himself any access permissions.
+				// If ownership transfer is rejected don't upgrade.
 				if modeWant.IsOwner() && !userData.modeGiven.BetterEqual(modeWant) {
 					userData.modeGiven |= modeWant
 				}
 			} else if modeWant.IsOwner() {
-				// Ownership transfer can only be initiated by the owner
+				// Ownership transfer can only be initiated by the owner.
 				sess.queueOut(ErrPermissionDenied(pktID, toriginal, now))
 				return changed, errors.New("non-owner cannot request ownership transfer")
-			} else if userData.modeGiven.IsAdmin() && modeWant.IsAdmin() {
-				// The Admin should be able to grant any permissions except ownership (checked previously) &
-				// hard-deleting messages.
+			} else if t.cat == types.TopicCatGrp && userData.modeGiven.IsAdmin() && modeWant.IsAdmin() {
+				// A group topic Admin should be able to grant himself any permissions except
+				// ownership (checked previously) & hard-deleting messages.
 				if !userData.modeGiven.BetterEqual(modeWant & ^types.ModeDelete) {
 					userData.modeGiven |= (modeWant & ^types.ModeDelete)
 				}
 			}
 
 			if t.cat == types.TopicCatP2P {
-				// For P2P topics ignore requests for 'D'. Otherwise it will generate a useless announcement
+				// For P2P topics ignore requests for 'D'. Otherwise it will generate a useless announcement.
 				modeWant = (modeWant & types.ModeCP2P) | types.ModeApprove
 			} else if t.cat == types.TopicCatSys {
-				//
+				// Anyone can always write to Sys topic.
 				modeWant &= (modeWant & types.ModeCSys) | types.ModeWrite
 			}
 		}
@@ -1111,7 +1084,7 @@ func (t *Topic) requestSub(h *Hub, sess *Session, asUid types.Uid, asLvl auth.Le
 		// If user has not requested a new access mode, provide one by default.
 		if modeWant == types.ModeUnset {
 			// If the user has self-banned before, un-self-ban. Otherwise do not make a change.
-			if !userData.modeWant.IsJoiner() {
+			if !oldWant.IsJoiner() {
 				log.Println("No J permissions before")
 				// Set permissions NO WORSE than default, but possibly better (admin or owner banned himself).
 				userData.modeWant = userData.modeGiven | t.accessFor(asLvl)
@@ -1164,9 +1137,13 @@ func (t *Topic) requestSub(h *Hub, sess *Session, asUid types.Uid, asLvl auth.Le
 	}
 
 	// If topic is being muted, send "off" notification and disable updates.
-	// DO it before applying the new permissions.
+	// Do it before applying the new permissions.
 	if (oldWant & oldGiven).IsPresencer() && !(userData.modeWant & userData.modeGiven).IsPresencer() {
-		t.presSingleUserOffline(asUid, "off+dis", nilPresParams, "", false)
+		if t.cat == types.TopicCatMe {
+			t.presUsersOfInterest("off+dis", t.userAgent)
+		} else {
+			t.presSingleUserOffline(asUid, "off+dis", nilPresParams, "", false)
+		}
 	}
 
 	// Apply changes.
@@ -1240,6 +1217,12 @@ func (t *Topic) approveSub(h *Hub, sess *Session, asUid, target types.Uid, set *
 		return false, errors.New("topic access denied; approver has no permission")
 	}
 
+	// Check if topic is suspended.
+	if t.isReadOnly() {
+		sess.queueOut(ErrPermissionDenied(set.Id, toriginal, now))
+		return false, errors.New("topic is suspended")
+	}
+
 	hostMode = userData.modeGiven & userData.modeWant
 
 	// Parse the access mode granted
@@ -1294,6 +1277,9 @@ func (t *Topic) approveSub(h *Hub, sess *Session, asUid, target types.Uid, set *
 		} else if user == nil {
 			sess.queueOut(ErrUserNotFound(set.Id, toriginal, now))
 			return false, errors.New("user not found")
+		} else if user.State != types.StateOK {
+			sess.queueOut(ErrPermissionDenied(set.Id, toriginal, now))
+			return false, errors.New("user is suspended")
 		} else {
 			// Don't ask by default for more permissions than the granted ones.
 			modeWant = user.Access.Auth & modeGiven
@@ -1321,6 +1307,13 @@ func (t *Topic) approveSub(h *Hub, sess *Session, asUid, target types.Uid, set *
 
 		// Cache user's record
 		usersRegisterUser(target, true)
+
+		// Send push notification for the new subscription.
+		pushRcpt := t.pushForSub(asUid, target, userData.modeWant, userData.modeGiven, now)
+		// TODO: maybe skip user's devices which were online when this event has happened.
+		if pushRcpt != nil {
+			usersPush(pushRcpt)
+		}
 	} else {
 		// Action on an existing subscription: re-invite, change existing permission, confirm/decline request.
 
@@ -1374,7 +1367,7 @@ func (t *Topic) replyGetDesc(sess *Session, asUid types.Uid, id string, opts *Ms
 	}
 
 	// Check if user requested modified data
-	ifUpdated := (opts == nil || opts.IfModifiedSince == nil || opts.IfModifiedSince.Before(t.updated))
+	ifUpdated := opts == nil || opts.IfModifiedSince == nil || opts.IfModifiedSince.Before(t.updated)
 
 	desc := &MsgTopicDesc{}
 	if !ifUpdated {
@@ -1412,11 +1405,14 @@ func (t *Topic) replyGetDesc(sess *Session, asUid types.Uid, id string, opts *Ms
 				Anon: t.accessAnon.String()}
 		}
 
-		if t.cat != types.TopicCatMe {
-			desc.Acs = &MsgAccessMode{
-				Want:  pud.modeWant.String(),
-				Given: pud.modeGiven.String(),
-				Mode:  (pud.modeGiven & pud.modeWant).String()}
+		desc.Acs = &MsgAccessMode{
+			Want:  pud.modeWant.String(),
+			Given: pud.modeGiven.String(),
+			Mode:  (pud.modeGiven & pud.modeWant).String()}
+
+		if t.cat == types.TopicCatMe && sess.authLvl == auth.LevelRoot {
+			// If 'me' is in memory then user account is invariably not suspended.
+			desc.State = types.StateOK.String()
 		}
 
 		if t.cat == types.TopicCatGrp && (pud.modeGiven & pud.modeWant).IsPresencer() {
@@ -1678,6 +1674,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 							return errors.New("attempt to search by restricted tags")
 						}
 
+						// FIXME: allow root to find suspended users and topics.
 						subs, err = store.Users.FindSubs(asUid, req, opt)
 						if err != nil {
 							sess.queueOut(decodeStoreError(err, id, t.original(asUid), now, nil))
@@ -1825,13 +1822,20 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 					mts.Acs.Mode = (sub.ModeGiven & sub.ModeWant).String()
 					mts.Acs.Want = sub.ModeWant.String()
 					mts.Acs.Given = sub.ModeGiven.String()
-				} else if defacs := sub.GetDefaultAccess(); defacs != nil {
+				} else {
 					// Topic 'fnd'
-					switch authLevel {
-					case auth.LevelAnon:
-						mts.Acs.Mode = defacs.Anon.String()
-					case auth.LevelAuth, auth.LevelRoot:
-						mts.Acs.Mode = defacs.Auth.String()
+					// sub.ModeXXX may be defined by the plugin.
+					if sub.ModeGiven.IsDefined() && sub.ModeWant.IsDefined() {
+						mts.Acs.Mode = (sub.ModeGiven & sub.ModeWant).String()
+						mts.Acs.Want = sub.ModeWant.String()
+						mts.Acs.Given = sub.ModeGiven.String()
+					} else if defacs := sub.GetDefaultAccess(); defacs != nil {
+						switch authLevel {
+						case auth.LevelAnon:
+							mts.Acs.Mode = defacs.Anon.String()
+						case auth.LevelAuth, auth.LevelRoot:
+							mts.Acs.Mode = defacs.Auth.String()
+						}
 					}
 				}
 
@@ -1941,11 +1945,9 @@ func (t *Topic) replyGetData(sess *Session, asUid types.Uid, id string, req *Msg
 		}
 
 		// Push the list of messages to the client as {data}.
-		// Messages are sent in reverse order than fetched from DB to make it easier for
-		// clients to process.
 		if messages != nil {
 			count = len(messages)
-			for i := count - 1; i >= 0; i-- {
+			for i := range messages {
 				mm := &messages[i]
 				sess.queueOut(&ServerComMessage{Data: &MsgServerData{
 					Topic:     toriginal,
@@ -2530,7 +2532,12 @@ func (t *Topic) notifySubChange(uid, actor types.Uid, oldWant, oldGiven,
 		// Subscription un-muted.
 
 		// Notify subscriber of topic's online status.
-		t.presSingleUserOffline(uid, "?unkn+en", nilPresParams, "", false)
+		if t.cat == types.TopicCatGrp {
+			t.presSingleUserOffline(uid, "?unkn+en", nilPresParams, "", false)
+		} else if t.cat == types.TopicCatMe {
+			// User is visible online now, notify subscribers.
+			t.presUsersOfInterest("on+en", t.userAgent)
+		}
 	}
 
 	// Notify requester's other sessions that permissions have changed.
@@ -2539,8 +2546,8 @@ func (t *Topic) notifySubChange(uid, actor types.Uid, oldWant, oldGiven,
 	}
 }
 
-// Prepares a payload to be delivered to a mobile device as a push notification.
-func (t *Topic) makePushReceipt(fromUid types.Uid, data *MsgServerData) *push.Receipt {
+// Prepares a payload to be delivered to a mobile device as a push notification in response to a {data} message.
+func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receipt {
 	// The `Topic` in the push receipt is `t.xoriginal` for group topics, `fromUid` for p2p topics,
 	// not the t.original(fromUid) because it's the topic name as seen by the recipient, not by the sender.
 	topic := t.xoriginal
@@ -2549,16 +2556,18 @@ func (t *Topic) makePushReceipt(fromUid types.Uid, data *MsgServerData) *push.Re
 	}
 
 	// Initialize the push receipt.
+	contentType, _ := data.Head["mime"].(string)
 	receipt := push.Receipt{
 		To: make(map[types.Uid]push.Recipient, t.subsCount()),
 		Payload: push.Payload{
-			Topic:     topic,
-			From:      data.From,
-			Timestamp: data.Timestamp,
-			SeqId:     data.SeqId,
-			Content:   data.Content,
-			Head:      data.Head,
-		}}
+			What:        push.ActMsg,
+			Silent:      false,
+			Topic:       topic,
+			From:        data.From,
+			Timestamp:   data.Timestamp,
+			SeqId:       data.SeqId,
+			ContentType: contentType,
+			Content:     data.Content}}
 
 	for uid := range t.perUser {
 		// Send only to those who have notifications enabled, exclude the originating user.
@@ -2576,6 +2585,33 @@ func (t *Topic) makePushReceipt(fromUid types.Uid, data *MsgServerData) *push.Re
 	return nil
 }
 
+// Prepares payload to be delivered to a mobile device as a push notification in response to a new subscription.
+func (t *Topic) pushForSub(fromUid, toUid types.Uid, want, given types.AccessMode, now time.Time) *push.Receipt {
+	// The `Topic` in the push receipt is `t.xoriginal` for group topics, `fromUid` for p2p topics,
+	// not the t.original(fromUid) because it's the topic name as seen by the recipient, not by the sender.
+	topic := t.xoriginal
+	if t.cat == types.TopicCatP2P {
+		topic = fromUid.UserId()
+	}
+
+	// Initialize the push receipt.
+	receipt := push.Receipt{
+		To: make(map[types.Uid]push.Recipient, t.subsCount()),
+		Payload: push.Payload{
+			What:      push.ActSub,
+			Silent:    false,
+			Topic:     topic,
+			From:      fromUid.UserId(),
+			Timestamp: now,
+			SeqId:     t.lastID,
+			ModeWant:  want,
+			ModeGiven: given}}
+
+	receipt.To[toUid] = push.Recipient{}
+
+	return &receipt
+}
+
 func (t *Topic) mostRecentSession() *Session {
 	var sess *Session
 	var latest time.Time
@@ -2589,46 +2625,72 @@ func (t *Topic) mostRecentSession() *Session {
 }
 
 const (
-	// Topic is just created.
-	topicStatusNew = 0
 	// Topic is fully initialized.
-	topicStatusLoaded = 1
-	// Topic is suspended.
-	topicStatusSuspended = 2
-	// Topic is in the process of being deleted.
-	topicStatusMarkedDeleted = 3
+	topicStatusLoaded = 0x1
+	// Topic is paused: all packets are rejected.
+	topicStatusPaused = 0x2
+
+	// Topic is in the process of being deleted. This is irrecoverable.
+	topicStatusMarkedDeleted = 0x10
+	// Topic is suspended: read-only mode.
+	topicStatusReadOnly = 0x20
 )
 
-func (t *Topic) markSuspended() int32 {
-	return atomic.SwapInt32((*int32)(&t.status), topicStatusSuspended)
+// statusChangeBits sets or removes given bits from t.status
+func (t *Topic) statusChangeBits(bits int32, set bool) {
+	for {
+		oldStatus := atomic.LoadInt32((*int32)(&t.status))
+		newStatus := oldStatus
+		if set {
+			newStatus = newStatus | bits
+		} else {
+			newStatus = newStatus & ^bits
+		}
+		if newStatus == oldStatus {
+			break
+		}
+		if atomic.CompareAndSwapInt32((*int32)(&t.status), oldStatus, newStatus) {
+			break
+		}
+	}
 }
 
-func (t *Topic) markDeleted() {
-	atomic.StoreInt32((*int32)(&t.status), topicStatusMarkedDeleted)
-}
-
-func (t *Topic) markNew() {
-	atomic.StoreInt32((*int32)(&t.status), topicStatusNew)
-}
-
+// markLoaded indicates that topic subscribers have been loaded into memory.
 func (t *Topic) markLoaded() {
-	atomic.StoreInt32((*int32)(&t.status), topicStatusLoaded)
+	t.statusChangeBits(topicStatusLoaded, true)
 }
 
-func (t *Topic) setStatus(status int32) {
-	atomic.StoreInt32((*int32)(&t.status), status)
+// markPaused pauses or unpauses the topic. When the topic is paused all
+// messages are rejected.
+func (t *Topic) markPaused(pause bool) {
+	t.statusChangeBits(topicStatusPaused, pause)
 }
 
-func (t *Topic) isActive() bool {
-	return atomic.LoadInt32((*int32)(&t.status)) <= topicStatusLoaded
+// markDeleted marks topic as being deleted.
+func (t *Topic) markDeleted() {
+	t.statusChangeBits(topicStatusMarkedDeleted, true)
+}
+
+// markReadOnly suspends/un-suspends the topic: adds or removes the 'read-only' flag.
+func (t *Topic) markReadOnly(readOnly bool) {
+	t.statusChangeBits(topicStatusReadOnly, readOnly)
+}
+
+// isInactive checks if topic is paused or being deleted.
+func (t *Topic) isInactive() bool {
+	return (atomic.LoadInt32((*int32)(&t.status)) & (topicStatusPaused | topicStatusMarkedDeleted)) != 0
+}
+
+func (t *Topic) isReadOnly() bool {
+	return (atomic.LoadInt32((*int32)(&t.status)) & topicStatusReadOnly) != 0
 }
 
 func (t *Topic) isLoaded() bool {
-	return atomic.LoadInt32((*int32)(&t.status)) == topicStatusLoaded
+	return (atomic.LoadInt32((*int32)(&t.status)) & topicStatusLoaded) != 0
 }
 
 func (t *Topic) isDeleted() bool {
-	return atomic.LoadInt32((*int32)(&t.status)) == topicStatusMarkedDeleted
+	return (atomic.LoadInt32((*int32)(&t.status)) & topicStatusMarkedDeleted) != 0
 }
 
 // Get topic name suitable for the given client

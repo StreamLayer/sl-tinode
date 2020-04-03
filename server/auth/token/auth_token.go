@@ -1,6 +1,5 @@
+// Package token implements authentication by HMAC-signed security token.
 package token
-
-// Authentication by HMAC-signed security token.
 
 import (
 	"bytes"
@@ -9,15 +8,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"sync"
 	"time"
 
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 )
-
-var disabledUserIDs *sync.Map
 
 // authenticator is a singleton instance of the authenticator.
 type authenticator struct {
@@ -43,7 +39,7 @@ type tokenLayout struct {
 }
 
 // Init initializes the authenticator: parses the config and sets salt, serial number and lifetime.
-func (ta *authenticator) Init(jsonconf, name string) error {
+func (ta *authenticator) Init(jsonconf json.RawMessage, name string) error {
 	if ta.name != "" {
 		return errors.New("auth_token: already initialized as " + ta.name + "; " + name)
 	}
@@ -57,8 +53,8 @@ func (ta *authenticator) Init(jsonconf, name string) error {
 		ExpireIn int `json:"expire_in"`
 	}
 	var config configType
-	if err := json.Unmarshal([]byte(jsonconf), &config); err != nil {
-		return errors.New("auth_token: failed to parse config: " + err.Error() + "(" + jsonconf + ")")
+	if err := json.Unmarshal(jsonconf, &config); err != nil {
+		return errors.New("auth_token: failed to parse config: " + err.Error() + "(" + string(jsonconf) + ")")
 	}
 
 	if len(config.Key) < sha256.Size {
@@ -72,18 +68,6 @@ func (ta *authenticator) Init(jsonconf, name string) error {
 	ta.hmacSalt = config.Key
 	ta.lifetime = time.Duration(config.ExpireIn) * time.Second
 	ta.serialNumber = config.SerialNum
-
-	disabledUserIDs = &sync.Map{}
-
-	// Load UIDs which were disabled within token lifetime.
-	disabled, err := store.Users.GetDisabled(time.Now().Add(-ta.lifetime))
-	if err != nil {
-		return err
-	}
-
-	for _, uid := range disabled {
-		disabledUserIDs.Store(uid, struct{}{})
-	}
 
 	return nil
 }
@@ -139,16 +123,12 @@ func (ta *authenticator) Authenticate(token []byte) (*auth.Rec, []byte, error) {
 		return nil, nil, types.ErrExpired
 	}
 
-	// Check if the user is disabled.
-	if _, disabled := disabledUserIDs.Load(types.Uid(tl.Uid)); disabled {
-		return nil, nil, types.ErrFailed
-	}
-
 	return &auth.Rec{
 		Uid:       types.Uid(tl.Uid),
 		AuthLevel: auth.Level(tl.AuthLevel),
 		Lifetime:  time.Until(expires),
-		Features:  auth.Feature(tl.Features)}, nil, nil
+		Features:  auth.Feature(tl.Features),
+		State:     types.StateUndefined}, nil, nil
 }
 
 // GenSecret generates a new token.
@@ -184,12 +164,17 @@ func (authenticator) IsUnique(token []byte) (bool, error) {
 
 // DelRecords adds disabled user ID to a stop list.
 func (authenticator) DelRecords(uid types.Uid) error {
-	disabledUserIDs.Store(uid, struct{}{})
 	return nil
 }
 
 // RestrictedTags returns tag namespaces restricted by this authenticator (none for token).
 func (authenticator) RestrictedTags() ([]string, error) {
+	return nil, nil
+}
+
+// GetResetParams returns authenticator parameters passed to password reset handler
+// (none for token).
+func (authenticator) GetResetParams(uid types.Uid) (map[string]interface{}, error) {
 	return nil, nil
 }
 

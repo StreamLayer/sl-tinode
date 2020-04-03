@@ -1,3 +1,4 @@
+// Package store provides methods for registering and accessing database adapters.
 package store
 
 import (
@@ -15,6 +16,7 @@ import (
 )
 
 var adp adapter.Adapter
+var availableAdapters = make(map[string]adapter.Adapter)
 var mediaHandler media.Handler
 
 // Unique ID generator
@@ -25,6 +27,8 @@ type configType struct {
 	UidKey []byte `json:"uid_key"`
 	// Maximum number of results to return from adapter.
 	MaxResults int `json:"max_results"`
+	// DB adapter name to use. Should be one of these specified in `Adapters`.
+	UseAdapter string `json:"use_adapter"`
 	// Configurations for individual adapters.
 	Adapters map[string]json.RawMessage `json:"adapters"`
 }
@@ -36,7 +40,21 @@ func openAdapter(workerId int, jsonconf json.RawMessage) error {
 	}
 
 	if adp == nil {
-		return errors.New("store: database adapter is missing")
+		if len(config.UseAdapter) > 0 {
+			// Adapter name specified explicitly.
+			if ad, ok := availableAdapters[config.UseAdapter]; ok {
+				adp = ad
+			} else {
+				return errors.New("store: " + config.UseAdapter + " adapter is not available in this binary")
+			}
+		} else if len(availableAdapters) == 1 {
+			// Default to the only entry in availableAdapters.
+			for _, v := range availableAdapters {
+				adp = v
+			}
+		} else {
+			return errors.New("store: db adapter is not specified. Please set `store_config.use_adapter` in `tinode.conf`")
+		}
 	}
 
 	if adp.IsOpen() {
@@ -153,11 +171,11 @@ func RegisterAdapter(a adapter.Adapter) {
 		panic("store: Register adapter is nil")
 	}
 
-	if adp != nil {
-		panic("store: adapter '" + adp.GetName() + "' is already registered")
+	adapterName := a.GetName()
+	if _, ok := availableAdapters[adapterName]; ok {
+		panic("store: adapter '" + adapterName + "' is already registered")
 	}
-
-	adp = a
+	availableAdapters[adapterName] = a
 }
 
 // GetUid generates a unique ID suitable for use as a primary key.
@@ -290,11 +308,6 @@ func (UsersObjMapper) Delete(id types.Uid, hard bool) error {
 	return adp.UserDelete(id, hard)
 }
 
-// GetDisabled returns user IDs which were disabled (soft-deleted) since specifid time.
-func (UsersObjMapper) GetDisabled(since time.Time) ([]types.Uid, error) {
-	return adp.UserGetDisabled(since)
-}
-
 // UpdateLastSeen updates LastSeen and UserAgent.
 func (UsersObjMapper) UpdateLastSeen(uid types.Uid, userAgent string, when time.Time) error {
 	return adp.UserUpdate(uid, map[string]interface{}{"LastSeen": when, "UserAgent": userAgent})
@@ -313,8 +326,16 @@ func (UsersObjMapper) UpdateTags(uid types.Uid, add, remove, reset []string) ([]
 	return adp.UserUpdateTags(uid, add, remove, reset)
 }
 
-// GetSubs loads a list of subscriptions for the given user. Does not load Public, does not load
-// deleted subscriptions.
+// UpdateState changes user's state and state of some topics associated with the user.
+func (UsersObjMapper) UpdateState(uid types.Uid, state types.ObjState) error {
+	update := map[string]interface{}{
+		"State":   state,
+		"StateAt": types.TimeNow()}
+	return adp.UserUpdate(uid, update)
+}
+
+// GetSubs loads a list of subscriptions for the given user.
+// Does not load Public, does not load deleted subscriptions.
 func (UsersObjMapper) GetSubs(id types.Uid, opts *types.QueryOpt) ([]types.Subscription, error) {
 	return adp.SubsForUser(id, false, opts)
 }
@@ -329,7 +350,15 @@ func (UsersObjMapper) FindSubs(id types.Uid, required, optional []string) ([]typ
 	if err != nil {
 		return nil, err
 	}
-	return append(usubs, tsubs...), nil
+
+	allSubs := append(usubs, tsubs...)
+	for i := range allSubs {
+		// Indicate that the returned access modes are not 'N', but rather undefined.
+		allSubs[i].ModeGiven = types.ModeUnset
+		allSubs[i].ModeWant = types.ModeUnset
+	}
+
+	return allSubs, nil
 }
 
 // GetTopics load a list of user's subscriptions with Public field copied to subscription
@@ -443,7 +472,7 @@ func (TopicsObjMapper) GetUsersAny(topic string, opts *types.QueryOpt) ([]types.
 }
 
 // GetSubs loads a list of subscriptions to the given topic, user.Public and deleted
-// subscriptions are not loaded
+// subscriptions are not loaded. Suspended subscriptions are loaded.
 func (TopicsObjMapper) GetSubs(topic string, opts *types.QueryOpt) ([]types.Subscription, error) {
 	return adp.SubsForTopic(topic, false, opts)
 }

@@ -2,6 +2,17 @@
 
 # Publish Tinode docker images
 
+function containerName() {
+  if [ "$1" == "alldbs" ]; then
+    # For alldbs, container name is simply tinode.
+    local name="tinode"
+  else
+    # Otherwise, tinode-$dbtag.
+    local name="tinode-${dbtag}"
+  fi
+  echo $name
+}
+
 for line in $@; do
   eval "$line"
 done
@@ -20,62 +31,24 @@ if [[ ${ver[2]} != *"-"* ]]; then
   FULLRELEASE=1
 fi
 
-dbtags=( mysql mongodb rethinkdb )
+dbtags=( mysql mongodb rethinkdb alldbs )
 
 # Read dockerhub login/password from a separate file
 source .dockerhub
 
-# Obtain dockerhub API auth token
-jstoken=`curl -X POST \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" \
-  https://hub.docker.com/v2/users/login/ \
-  | python -c "import json,sys;obj=json.load(sys.stdin);print obj['token'];"`
-
-# Remove earlier builds
-for dbtag in "${dbtags[@]}"
-do
-  if [ -n "$FULLRELEASE" ]; then
-    curl -i -X DELETE \
-      -H "Accept: application/json" \
-      -H "Authorization: JWT ${jstoken}" \
-      https://hub.docker.com/v2/repositories/tinode/tinode-${dbtag}/tags/latest/
-
-    curl -i -X DELETE \
-      -H "Accept: application/json" \
-      -H "Authorization: JWT ${jstoken}" \
-      https://hub.docker.com/v2/repositories/tinode/tinode-${dbtag}/tags/${ver[0]}.${ver[1]}/
-  fi
-  curl -i -X DELETE \
-    -H "Accept: application/json" \
-    -H "Authorization: JWT ${jstoken}" \
-    https://hub.docker.com/v2/repositories/tinode/tinode-${dbtag}/tags/${ver[0]}.${ver[1]}.${ver[2]}/
-done
-
-if [ -n "$FULLRELEASE" ]; then
-  curl -i -X DELETE \
-    -H "Accept: application/json" \
-    -H "Authorization: JWT ${jstoken}" \
-    https://hub.docker.com/v2/repositories/tinode/chatbot/tags/latest/
-  curl -i -X DELETE \
-    -H "Accept: application/json" \
-    -H "Authorization: JWT ${jstoken}" \
-    https://hub.docker.com/v2/repositories/tinode/chatbot/tags/${ver[0]}.${ver[1]}/
-fi
-curl -i -X DELETE \
-  -H "Accept: application/json" \
-  -H "Authorization: JWT ${jstoken}" \
-  https://hub.docker.com/v2/repositories/tinode/chatbot/tags/${ver[0]}.${ver[1]}.${ver[2]}/
+# Login to docker hub
+docker login -u $user -p $pass
 
 # Deploy images for various DB backends
 for dbtag in "${dbtags[@]}"
 do
+  name="$(containerName $dbtag)"
   # Deploy tagged image
   if [ -n "$FULLRELEASE" ]; then
-    docker push tinode/tinode-${dbtag}:latest
-    docker push tinode/tinode-${dbtag}:"${ver[0]}.${ver[1]}"
+    docker push tinode/${name}:latest
+    docker push tinode/${name}:"${ver[0]}.${ver[1]}"
   fi
-  docker push tinode/tinode-${dbtag}:"${ver[0]}.${ver[1]}.${ver[2]}"
+  docker push tinode/${name}:"${ver[0]}.${ver[1]}.${ver[2]}"
 done
 
 # Deploy chatbot images
@@ -84,3 +57,12 @@ if [ -n "$FULLRELEASE" ]; then
   docker push tinode/chatbot:"${ver[0]}.${ver[1]}"
 fi
 docker push tinode/chatbot:"${ver[0]}.${ver[1]}.${ver[2]}"
+
+# Deploy exporter images
+if [ -n "$FULLRELEASE" ]; then
+  docker push tinode/exporter:latest
+  docker push tinode/exporter:"${ver[0]}.${ver[1]}"
+fi
+docker push tinode/exporter:"${ver[0]}.${ver[1]}.${ver[2]}"
+
+docker logout

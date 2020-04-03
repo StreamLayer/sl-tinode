@@ -44,7 +44,7 @@ const sendQueueLimit = 128
 
 var minSupportedVersionValue = parseVersion(minSupportedVersion)
 
-// Holds metadata on the subscription/topic hosted on a remote node.
+// RemoteSubscription holds metadata on the subscription/topic hosted on a remote node.
 type RemoteSubscription struct {
 	// Hosting node.
 	node string
@@ -58,25 +58,25 @@ type Session struct {
 	// protocol - NONE (unset), WEBSOCK, LPOLL, CLUSTER, GRPC
 	proto int
 
-	// Websocket. Set only for websocket sessions
+	// Websocket. Set only for websocket sessions.
 	ws *websocket.Conn
 
-	// Pointer to session's record in sessionStore. Set only for Long Poll sessions
+	// Pointer to session's record in sessionStore. Set only for Long Poll sessions.
 	lpTracker *list.Element
 
-	// gRPC handle. Set only for gRPC clients
+	// gRPC handle. Set only for gRPC clients.
 	grpcnode pbx.Node_MessageLoopServer
 
-	// Reference to the cluster node where the session has originated. Set only for cluster RPC sessions
+	// Reference to the cluster node where the session has originated. Set only for cluster RPC (proxied) sessions.
 	clnode *ClusterNode
 
-	// IP address of the client. For long polling this is the IP of the last poll
+	// IP address of the client. For long polling this is the IP of the last poll.
 	remoteAddr string
 
-	// User agent, a string provived by an authenticated client in {login} packet
+	// User agent, a string provived by an authenticated client in {login} packet.
 	userAgent string
 
-	// Protocol version of the client: ((major & 0xff) << 8) | (minor & 0xff)
+	// Protocol version of the client: ((major & 0xff) << 8) | (minor & 0xff).
 	ver int
 
 	// Device ID of the client
@@ -117,6 +117,7 @@ type Session struct {
 	subsLock sync.RWMutex
 
 	// Map of remote topic subscriptions, indexed by topic name.
+	// It does not contain actual subscriptions but rather "maybe subscriptions".
 	remoteSubs map[string]*RemoteSubscription
 	// Synchronizes access to remoteSubs.
 	remoteSubsLock sync.RWMutex
@@ -163,6 +164,10 @@ func (s *Session) delSub(topic string) {
 	defer s.subsLock.Unlock()
 
 	delete(s.subs, topic)
+}
+
+func (s *Session) countSub() int {
+	return len(s.subs)
 }
 
 // Inform topics that the session is being terminated.
@@ -277,6 +282,10 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 		// Only root user can set non-default msg.from && msg.authLvl values.
 		s.queueOut(ErrPermissionDenied("", "", msg.timestamp))
 		log.Println("s.dispatch: non-root asigned msg.from", s.sid)
+		return
+	} else if fromUid := types.ParseUserId(msg.from); fromUid.IsZero() {
+		s.queueOut(ErrMalformed("", "", msg.timestamp))
+		log.Println("s.dispatch: malformed msg.from: ", msg.from, s.sid)
 		return
 	}
 
@@ -399,10 +408,10 @@ func (s *Session) subscribe(msg *ClientComMessage) {
 	var expanded string
 	isNewTopic := false
 	if strings.HasPrefix(msg.topic, "new") {
-		// Request to create a new named topic
-		expanded = genTopicName()
+		// Request to create a new named topic.
+		// If we are in a cluster, make sure the new topic belongs to the current node.
+		expanded = globals.cluster.genLocalTopicName()
 		isNewTopic = true
-		// msg.topic = expanded
 	} else {
 		var resp *ServerComMessage
 		expanded, resp = s.expandTopicName(msg)
@@ -428,6 +437,7 @@ func (s *Session) subscribe(msg *ClientComMessage) {
 			} else {
 				originalTopic = msg.topic
 			}
+			// FIXME: we don't really know if subscription was successful.
 			s.addRemoteSub(expanded, &RemoteSubscription{node: remoteNodeName, originalTopic: originalTopic})
 		}
 	} else {
@@ -469,6 +479,7 @@ func (s *Session) leave(msg *ClientComMessage) {
 			log.Println("s.leave:", err, s.sid)
 			s.queueOut(ErrClusterUnreachable(msg.id, msg.topic, msg.timestamp))
 		} else {
+			// FIXME: we don't really know if leave succeeded.
 			s.delRemoteSub(expanded)
 		}
 	} else if !msg.Leave.Unsub {
@@ -697,6 +708,20 @@ func (s *Session) login(msg *ClientComMessage) {
 		return
 	}
 
+	// If authenticator did not check user state, it returns state "undef". If so, check user state here.
+	if rec.State == types.StateUndefined {
+		rec.State, err = userGetState(rec.Uid)
+	}
+	if err == nil && rec.State != types.StateOK {
+		err = types.ErrPermissionDenied
+	}
+
+	if err != nil {
+		log.Println("s.login: user state check failed", rec.Uid, err, s.sid)
+		s.queueOut(decodeStoreError(err, msg.id, "", msg.timestamp, nil))
+		return
+	}
+
 	if challenge != nil {
 		// Multi-stage authentication. Issue challenge to the client.
 		s.queueOut(InfoChallenge(msg.id, msg.timestamp, challenge))
@@ -732,7 +757,8 @@ func (s *Session) authSecretReset(params []byte) error {
 
 	// Technically we don't need to check it here, but we are going to mail the 'authName' string to the user.
 	// We have to make sure it does not contain any exploits. This is the simplest check.
-	if hdl := store.GetLogicalAuthHandler(authScheme); hdl == nil {
+	hdl := store.GetLogicalAuthHandler(authScheme)
+	if hdl == nil {
 		return types.ErrUnsupported
 	}
 	validator := store.GetValidator(credMethod)
@@ -747,6 +773,11 @@ func (s *Session) authSecretReset(params []byte) error {
 		return types.ErrNotFound
 	}
 
+	resetParams, err := hdl.GetResetParams(uid)
+	if err != nil {
+		return err
+	}
+
 	token, _, err := store.GetLogicalAuthHandler("token").GenSecret(&auth.Rec{
 		Uid:       uid,
 		AuthLevel: auth.LevelAuth,
@@ -757,7 +788,7 @@ func (s *Session) authSecretReset(params []byte) error {
 		return err
 	}
 
-	return validator.ResetSecret(credValue, authScheme, s.lang, token)
+	return validator.ResetSecret(credValue, authScheme, s.lang, token, resetParams)
 }
 
 // onLogin performs steps after successful authentication.
@@ -1031,6 +1062,12 @@ func (s *Session) serialize(msg *ServerComMessage) interface{} {
 	if s.proto == GRPC {
 		return pbServSerialize(msg)
 	}
+
+	if s.proto == CLUSTER {
+		// No need to serialize the message to bytes within the cluster.
+		return msg
+	}
+
 	out, _ := json.Marshal(msg)
 	return out
 }

@@ -26,16 +26,19 @@ func genDb(data *Data) {
 
 	// Add authentication record
 	authHandler := store.GetAuthHandler("basic")
-	authHandler.Init(`{"add_to_tags": true}`, "basic")
+	authHandler.Init([]byte(`{"add_to_tags": true}`), "basic")
 
 	nameIndex := make(map[string]string, len(data.Users))
 
 	log.Println("Generating users...")
 
 	for _, uu := range data.Users {
-
+		state, err := types.NewObjState(uu.State)
+		if err != nil {
+			log.Fatal(err)
+		}
 		user := types.User{
-			State: uu.State,
+			State: state,
 			Access: types.DefaultAccess{
 				Auth: types.ModeCAuth,
 				Anon: types.ModeNone,

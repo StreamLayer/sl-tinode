@@ -1,6 +1,5 @@
+// Package rest provides authentication by calling a separate process over REST API (technically JSON RPC, not REST).
 package rest
-
-// Authentication by calling a separate process over REST API.
 
 import (
 	"bytes"
@@ -67,7 +66,7 @@ type response struct {
 }
 
 // Init initializes the handler.
-func (a *authenticator) Init(jsonconf, name string) error {
+func (a *authenticator) Init(jsonconf json.RawMessage, name string) error {
 	if a.name != "" {
 		return errors.New("auth_rest: already initialized as " + a.name + "; " + name)
 	}
@@ -82,9 +81,9 @@ func (a *authenticator) Init(jsonconf, name string) error {
 	}
 
 	var config configType
-	err := json.Unmarshal([]byte(jsonconf), &config)
+	err := json.Unmarshal(jsonconf, &config)
 	if err != nil {
-		return errors.New("auth_rest: failed to parse config: " + err.Error() + "(" + jsonconf + ")")
+		return errors.New("auth_rest: failed to parse config: " + err.Error() + "(" + string(jsonconf) + ")")
 	}
 
 	serverUrl, err := url.Parse(config.ServerUrl)
@@ -180,6 +179,7 @@ func (a *authenticator) Authenticate(secret []byte) (*auth.Rec, []byte, error) {
 		// Create account, get UID, report UID back to the server.
 
 		user := types.User{
+			State:  resp.Record.State,
 			Public: resp.NewAcc.Public,
 			Tags:   resp.Record.Tags,
 		}
@@ -237,6 +237,13 @@ func (a *authenticator) RestrictedTags() ([]string, error) {
 	}
 
 	return resp.StrSliceVal, nil
+}
+
+// GetResetParams returns authenticator parameters passed to password reset handler
+// (none for rest).
+func (authenticator) GetResetParams(uid types.Uid) (map[string]interface{}, error) {
+	// TODO: route request to the server.
+	return nil, nil
 }
 
 func init() {

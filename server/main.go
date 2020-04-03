@@ -22,10 +22,10 @@ import (
 	"strings"
 	"time"
 
-	// For stripping comments from JSON config
-	jcr "github.com/DisposaBoy/JsonConfigReader"
-
 	gh "github.com/gorilla/handlers"
+
+	// For stripping comments from JSON config
+	jcr "github.com/tinode/jsonco"
 
 	// Authenticators
 	"github.com/tinode/chat/server/auth"
@@ -44,6 +44,7 @@ import (
 	_ "github.com/tinode/chat/server/push/fcm"
 	_ "github.com/tinode/chat/server/push/http"
 	_ "github.com/tinode/chat/server/push/stdout"
+	_ "github.com/tinode/chat/server/push/tnpg"
 
 	"github.com/tinode/chat/server/store"
 
@@ -194,7 +195,7 @@ type configType struct {
 	// Can be overridden from the command line, see option --listen.
 	Listen string `json:"listen"`
 	// Base URL path where the streaming and large file API calls are served, default is '/'.
-	// Can be overriden from the command line, see option --api_path.
+	// Can be overridden from the command line, see option --api_path.
 	ApiPath string `json:"api_path"`
 	// Cache-Control value for static content.
 	CacheControl int `json:"cache_control"`
@@ -240,9 +241,9 @@ func main() {
 	// Absolute paths are left unchanged.
 	rootpath, _ := filepath.Split(executable)
 
-	log.Printf("Server v%s:%s:%s; db: '%s'; pid %d; %d process(es)",
+	log.Printf("Server v%s:%s:%s; pid %d; %d process(es)",
 		currentVersion, executable, buildstamp,
-		store.GetAdapterName(), os.Getpid(), runtime.GOMAXPROCS(runtime.NumCPU()))
+		os.Getpid(), runtime.GOMAXPROCS(runtime.NumCPU()))
 
 	var configfile = flag.String("config", "tinode.conf", "Path to config file.")
 	// Path to static content.
@@ -264,17 +265,15 @@ func main() {
 	if file, err := os.Open(*configfile); err != nil {
 		log.Fatal("Failed to read config file: ", err)
 	} else {
-		if err = json.NewDecoder(jcr.New(file)).Decode(&config); err != nil {
-			// Need to reset file to start in order to convert byte offset to line number and character position.
-			// Ignore possible error: can't use it anyway.
-			file.Seek(0, 0)
+		jr := jcr.New(file)
+		if err = json.NewDecoder(jr).Decode(&config); err != nil {
 			switch jerr := err.(type) {
 			case *json.UnmarshalTypeError:
-				lnum, cnum, _ := offsetToLineAndChar(file, jerr.Offset)
+				lnum, cnum, _ := jr.LineAndChar(jerr.Offset)
 				log.Fatalf("Unmarshall error in config file in %s at %d:%d (offset %d bytes): %s",
 					jerr.Field, lnum, cnum, jerr.Offset, jerr.Error())
 			case *json.SyntaxError:
-				lnum, cnum, _ := offsetToLineAndChar(file, jerr.Offset)
+				lnum, cnum, _ := jr.LineAndChar(jerr.Offset)
 				log.Fatalf("Syntax error in config file at %d:%d (offset %d bytes): %s",
 					lnum, cnum, jerr.Offset, jerr.Error())
 			default:
@@ -298,7 +297,7 @@ func main() {
 	}
 	statsInit(mux, evpath)
 	statsRegisterInt("Version")
-	statsSet("Version", int64(parseVersion(currentVersion)))
+	statsSet("Version", base10Version(parseVersion(currentVersion)))
 
 	// Initialize serving debug profiles (optional).
 	servePprof(mux, *pprofUrl)
@@ -333,6 +332,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to connect to DB: ", err)
 	}
+	log.Println("DB adapter", store.GetAdapterName())
 	defer func() {
 		store.Close()
 		log.Println("Closed database connection(s)")
@@ -356,7 +356,7 @@ func main() {
 		if authhdl := store.GetLogicalAuthHandler(name); authhdl == nil {
 			log.Fatalln("Unknown authenticator", name)
 		} else if jsconf := config.Auth[name]; jsconf != nil {
-			if err := authhdl.Init(string(jsconf), name); err != nil {
+			if err := authhdl.Init(jsconf, name); err != nil {
 				log.Fatalln("Failed to init auth scheme", name+":", err)
 			}
 			tags, err := authhdl.RestrictedTags()
