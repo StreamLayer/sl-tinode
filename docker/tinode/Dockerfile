@@ -11,7 +11,7 @@
 
 FROM alpine:3.11
 
-ARG VERSION=0.16
+ARG VERSION=makeomatic-0.16.5-beta6.2
 ENV VERSION=$VERSION
 ARG BINVERS=$VERSION
 
@@ -115,11 +115,11 @@ RUN apk update && \
 WORKDIR /opt/tinode
 
 # Get the desired Tinode build.
-ADD ./releases/$VERSION/tinode-$TARGET_DB.linux-amd64.tar.gz .
+ADD ./releases/$VERSION .
 
 # Unpack the Tinode archive.
-#RUN tar -xzf tinode-$TARGET_DB.linux-amd64.tar.gz \
-#	&& rm tinode-$TARGET_DB.linux-amd64.tar.gz
+RUN tar -xzf tinode-$TARGET_DB.linux-amd64.tar.gz \
+	&& rm tinode-$TARGET_DB.linux-amd64.tar.gz
 
 # Copy config template to the container.
 COPY config.template .
