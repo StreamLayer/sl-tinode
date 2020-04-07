@@ -116,8 +116,8 @@ COPY entrypoint.sh .
 ADD ./releases/$VERSION/tinode-$TARGET_DB.linux-amd64.tar.gz .
 
 # Unpack the Tinode archive.
-RUN tar -xzf tinode-$TARGET_DB.linux-amd64.tar.gz \
-	&& rm tinode-$TARGET_DB.linux-amd64.tar.gz
+#RUN tar -xzf tinode-$TARGET_DB.linux-amd64.tar.gz \
+#	&& rm tinode-$TARGET_DB.linux-amd64.tar.gz
 
 # Create directory for chatbot data.
 RUN mkdir /botdata
