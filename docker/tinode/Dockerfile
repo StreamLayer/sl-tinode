@@ -11,7 +11,7 @@
 
 FROM alpine:latest
 
-ARG VERSION=0.16
+ARG VERSION=makeomatic-0.16.5-beta6.2
 ENV VERSION=$VERSION
 ARG BINVERS=$VERSION
 
@@ -113,11 +113,11 @@ COPY config.template .
 COPY entrypoint.sh .
 
 # Get the desired Tinode build.
-ADD ./releases/$VERSION/tinode-$TARGET_DB.linux-amd64.tar.gz .
+ADD ./releases/$VERSION .
 
 # Unpack the Tinode archive.
-#RUN tar -xzf tinode-$TARGET_DB.linux-amd64.tar.gz \
-#	&& rm tinode-$TARGET_DB.linux-amd64.tar.gz
+RUN tar -xzf tinode-$TARGET_DB.linux-amd64.tar.gz \
+	&& rm tinode-$TARGET_DB.linux-amd64.tar.gz
 
 # Create directory for chatbot data.
 RUN mkdir /botdata
