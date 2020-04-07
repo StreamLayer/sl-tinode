@@ -138,4 +138,4 @@ fi
 args=("--config=${CONFIG}" "--static_data=$STATIC_DIR" "--cluster_self=$CLUSTER_SELF" "--pprof_url=$PPROF_URL")
 
 # Run the tinode server.
-./tinode "${args[@]}" 2>> /var/log/tinode.log
+./tinode "${args[@]}"
