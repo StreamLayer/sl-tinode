@@ -83,6 +83,12 @@ ENV TLS_ENABLED=false
 
 # Disable push notifications by default.
 ENV FCM_PUSH_ENABLED=false
+# Declare FCM-related vars
+ENV FCM_API_KEY=
+ENV FCM_APP_ID=
+ENV FCM_SENDER_ID=
+ENV FCM_PROJECT_ID=
+ENV FCM_VAPID_KEY=
 
 # Enable Android-specific notifications by default.
 ENV FCM_INCLUDE_ANDROID_NOTIFICATION=true
@@ -93,8 +99,8 @@ ENV TNPG_PUSH_ENABLED=false
 # Tinode Push Gateway authentication token.
 ENV TNPG_AUTH_TOKEN=
 
-# Tinode Push Gateway user name.
-ENV TNPG_USER=
+# Tinode Push Gateway organization name as registered at console.tinode.co
+ENV TNPG_ORG=
 
 # Use the target db by default.
 # When TARGET_DB is "alldbs", it is the user's responsibility
