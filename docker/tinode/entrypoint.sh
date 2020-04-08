@@ -137,5 +137,6 @@ fi
 
 args=("--config=${CONFIG}" "--static_data=$STATIC_DIR" "--cluster_self=$CLUSTER_SELF" "--pprof_url=$PPROF_URL")
 
-# Run the tinode server.
+# Run the tinode server. Write logs to file or console.
+# ./tinode "${args[@]}" 2>> /var/log/tinode.log
 ./tinode "${args[@]}"
