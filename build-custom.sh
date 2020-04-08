@@ -56,7 +56,7 @@ do
       rm -f $GOPATH/bin/init-db
       # Build tinode server and database initializer for RethinkDb and MySQL.
       $GOPATH/bin/gox -osarch="${plat}/${arc}" \
-        -ldflags "-s -w -X main.buildstamp=`git describe --tags`" \
+        -ldflags "-s -w -X main.buildstamp=${version}" \
         -tags ${dbtag} -output $GOPATH/bin/tinode ./server > /dev/null
       $GOPATH/bin/gox -osarch="${plat}/${arc}" \
         -ldflags "-s -w" \
