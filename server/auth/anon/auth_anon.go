@@ -1,9 +1,9 @@
+// Package anon provides authentication without credentials. Most useful for customer support.
+// Anonymous authentication is used only at the account creation time.
 package anon
 
-// Authentication without credentials. Most useful for customer support.
-// Anonymous authentication is used only at account creation time.
-
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/tinode/chat/server/auth"
@@ -15,7 +15,7 @@ import (
 type authenticator struct{}
 
 // Init is a noop, always returns success.
-func (authenticator) Init(_, _ string) error {
+func (authenticator) Init(_ json.RawMessage, _ string) error {
 	return nil
 }
 
@@ -25,6 +25,7 @@ func (authenticator) AddRecord(rec *auth.Rec, secret []byte) (*auth.Rec, error) 
 	if rec.AuthLevel == auth.LevelNone {
 		rec.AuthLevel = auth.LevelAnon
 	}
+	rec.State = types.StateOK
 	return rec, nil
 }
 
@@ -55,6 +56,12 @@ func (authenticator) DelRecords(uid types.Uid) error {
 
 // RestrictedTags returns tag namespaces restricted by this authenticator (none for anonymous).
 func (authenticator) RestrictedTags() ([]string, error) {
+	return nil, nil
+}
+
+// GetResetParams returns authenticator parameters passed to password reset handler
+// (none for anonymous).
+func (authenticator) GetResetParams(uid types.Uid) (map[string]interface{}, error) {
 	return nil, nil
 }
 

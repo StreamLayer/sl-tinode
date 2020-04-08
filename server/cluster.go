@@ -22,6 +22,8 @@ const (
 	defaultClusterReconnect = 200 * time.Millisecond
 	// Number of replicas in ringhash
 	clusterHashReplicas = 20
+	// Period for running health check on cluster session: terminate sessions with no subscriptions.
+	clusterSessionCleanup = 5 * time.Second
 )
 
 type clusterNodeConfig struct {
@@ -129,7 +131,8 @@ type ClusterReq struct {
 
 // ClusterResp is a Master to Proxy response message.
 type ClusterResp struct {
-	Msg []byte
+	// Server message with the response.
+	SrvMsg *ServerComMessage
 	// Session ID to forward message to, if any.
 	FromSID string
 }
@@ -183,7 +186,7 @@ func (n *ClusterNode) reconnect() {
 			n.reconnecting = false
 			n.lock.Unlock()
 			statsInc("LiveClusterNodes", 1)
-			log.Printf("cluster: connection to '%s' established", n.name)
+			log.Println("cluster: connected to", n.name)
 			return
 		} else if count == 0 {
 			reconnTicker = time.NewTicker(defaultClusterReconnect)
@@ -196,7 +199,7 @@ func (n *ClusterNode) reconnect() {
 			// Wait for timer to try to reconnect again. Do nothing if the timer is inactive.
 		case <-n.done:
 			// Shutting down
-			log.Printf("cluster: node '%s' shutdown started", n.name)
+			log.Println("cluster: shutdown started at node", n.name)
 			reconnTicker.Stop()
 			if n.endpoint != nil {
 				n.endpoint.Close()
@@ -205,7 +208,7 @@ func (n *ClusterNode) reconnect() {
 			n.connected = false
 			n.reconnecting = false
 			n.lock.Unlock()
-			log.Printf("cluster: node '%s' shut down completed", n.name)
+			log.Println("cluster: shut down completed at node", n.name)
 			return
 		}
 	}
@@ -279,7 +282,6 @@ func (n *ClusterNode) callAsync(proc string, msg, resp interface{}, done chan *r
 
 // Proxy forwards message to master
 func (n *ClusterNode) forward(msg *ClusterReq) error {
-	log.Printf("cluster: forwarding request to node '%s'", n.name)
 	msg.Node = globals.cluster.thisNodeName
 	var rejected bool
 	err := n.call("Cluster.Master", msg, &rejected)
@@ -291,14 +293,12 @@ func (n *ClusterNode) forward(msg *ClusterReq) error {
 
 // Master responds to proxy
 func (n *ClusterNode) respond(msg *ClusterResp) error {
-	log.Printf("cluster: replying to node '%s'", n.name)
 	var unused bool
 	return n.call("Cluster.Proxy", msg, &unused)
 }
 
 // Routes the message within the cluster.
 func (n *ClusterNode) route(msg *ClusterReq) error {
-	log.Printf("cluster: routing message for topic '%s' to node '%s'", msg.RcptTo, n.name)
 	var unused bool
 	return n.call("Cluster.Route", msg, &unused)
 }
@@ -326,11 +326,9 @@ type Cluster struct {
 
 // Master at topic's master node receives C2S messages from topic's proxy nodes.
 // The message is treated like it came from a session: find or create a session locally,
-// dispatch the message to it like it came from a normal ws/lp connection.
+// dispatch the message to it like it came from a normal ws/lp/gRPC connection.
 // Called by a remote node.
 func (c *Cluster) Master(msg *ClusterReq, rejected *bool) error {
-	log.Printf("cluster: Master request received from node '%s'", msg.Node)
-
 	// Find the local session associated with the given remote session.
 	sess := globals.sessionStore.Get(msg.Sess.Sid)
 
@@ -359,7 +357,9 @@ func (c *Cluster) Master(msg *ClusterReq, rejected *bool) error {
 
 		if sess == nil {
 			// If the session is not found, create it.
-			sess, _ = globals.sessionStore.NewSession(node, msg.Sess.Sid)
+			var count int
+			sess, count = globals.sessionStore.NewSession(node, msg.Sess.Sid)
+			log.Println("cluster: session proxy started", msg.Sess.Sid, count)
 			go sess.rpcWriteLoop()
 		}
 
@@ -378,6 +378,7 @@ func (c *Cluster) Master(msg *ClusterReq, rejected *bool) error {
 		msg.CliMsg.authLvl = msg.AuthLvl
 		sess.dispatch(msg.CliMsg)
 	} else {
+		log.Println("cluster Master: session signature mismatch", msg.Sess.Sid)
 		// Reject the request: wrong signature, cluster is out of sync.
 		*rejected = true
 	}
@@ -388,12 +389,11 @@ func (c *Cluster) Master(msg *ClusterReq, rejected *bool) error {
 // Proxy receives messages from the master node addressed to a specific local session.
 // Called by Session.writeRPC
 func (Cluster) Proxy(msg *ClusterResp, unused *bool) error {
-	log.Println("cluster: response from Master for session", msg.FromSID)
 
 	// This cluster member received a response from topic owner to be forwarded to a session
 	// Find appropriate session, send the message to it
 	if sess := globals.sessionStore.Get(msg.FromSID); sess != nil {
-		if !sess.queueOutBytes(msg.Msg) {
+		if !sess.queueOut(msg.SrvMsg) {
 			log.Println("cluster.Proxy: timeout")
 		}
 	} else {
@@ -406,10 +406,15 @@ func (Cluster) Proxy(msg *ClusterResp, unused *bool) error {
 // Route endpoint receives intra-cluster messages (e.g. pres) destined for the nodes hosting topic.
 // Called by Hub.route channel consumer.
 func (c *Cluster) Route(msg *ClusterReq, rejected *bool) error {
-	log.Printf("cluster: node '%s' received route request for topic '%s' from node '%s'", c.thisNodeName, msg.RcptTo, msg.Node)
-
 	*rejected = false
-	if msg.Signature != c.ring.Signature() || msg.SrvMsg == nil {
+	if msg.Signature != c.ring.Signature() {
+		log.Println("cluster Route: session signature mismatch", msg.Sess.Sid)
+		*rejected = true
+		return nil
+	}
+	if msg.SrvMsg == nil {
+		// TODO: maybe panic here.
+		log.Println("cluster Route: nil server message", msg.Sess.Sid)
 		*rejected = true
 		return nil
 	}
@@ -423,7 +428,6 @@ func (c *Cluster) Route(msg *ClusterReq, rejected *bool) error {
 
 // UserCacheUpdate endpoint receives updates to user's cached values as well as sends push notifications.
 func (c *Cluster) UserCacheUpdate(msg *UserCacheReq, rejected *bool) error {
-	log.Printf("cluster: node '%s' received user cache update from node '%s'", c.thisNodeName, msg.Node)
 	usersRequestFromCluster(msg)
 	return nil
 }
@@ -436,7 +440,7 @@ func (c *Cluster) routeUserReq(req *UserCacheReq) error {
 
 	if req.PushRcpt != nil {
 		// Request to send push notifications. Create separate packets for each affected cluster node.
-		for uid, recepient := range req.PushRcpt.To {
+		for uid, recipient := range req.PushRcpt.To {
 			n := c.nodeForTopic(uid.UserId())
 			if n == nil {
 				return errors.New("attempt to update user at a non-existent node (1)")
@@ -449,7 +453,7 @@ func (c *Cluster) routeUserReq(req *UserCacheReq) error {
 						To:      make(map[types.Uid]push.Recipient)},
 					Node: c.thisNodeName}
 			}
-			r.PushRcpt.To[uid] = recepient
+			r.PushRcpt.To[uid] = recipient
 			reqByNode[n.name] = r
 		}
 	} else if len(req.UserIdList) > 0 {
@@ -522,6 +526,21 @@ func (c *Cluster) isRemoteTopic(topic string) bool {
 	return c.ring.Get(topic) != c.thisNodeName
 }
 
+// genLocalTopicName is just like genTopicName(), but the generated name belongs to the current cluster node.
+func (c *Cluster) genLocalTopicName() string {
+	topic := genTopicName()
+	if c == nil {
+		// Cluster not initialized, all topics are local
+		return topic
+	}
+
+	// FIXME: if cluster is large it may become too inefficient.
+	for c.ring.Get(topic) != c.thisNodeName {
+		topic = genTopicName()
+	}
+	return topic
+}
+
 // Returns remote node name where the topic is hosted.
 // If the topic is hosted locally, returns an empty string.
 func (c *Cluster) nodeNameForTopicIfRemote(topic string) string {
@@ -552,7 +571,7 @@ func (c *Cluster) routeToTopic(msg *ClientComMessage, topic string, sess *Sessio
 	// Find the cluster node which owns the topic, then forward to it.
 	n := c.nodeForTopic(topic)
 	if n == nil {
-		return errors.New("attempt to route to non-existent node")
+		return errors.New("node for topic not found")
 	}
 
 	if sess.getRemoteSub(topic) == nil {
@@ -590,7 +609,7 @@ func (c *Cluster) routeToTopic(msg *ClientComMessage, topic string, sess *Sessio
 func (c *Cluster) routeToTopicIntraCluster(topic string, msg *ServerComMessage) error {
 	n := c.nodeForTopic(topic)
 	if n == nil {
-		return errors.New("attempt to route to non-existent node")
+		return errors.New("node for topic not found (intra)")
 	}
 
 	req := &ClusterReq{
@@ -680,6 +699,8 @@ func clusterInit(configString json.RawMessage, self *string) int {
 
 	gob.Register([]interface{}{})
 	gob.Register(map[string]interface{}{})
+	gob.Register(map[string]int{})
+	gob.Register(map[string]string{})
 
 	globals.cluster = &Cluster{
 		thisNodeName: thisName,
@@ -723,11 +744,13 @@ func clusterInit(configString json.RawMessage, self *string) int {
 func (sess *Session) rpcWriteLoop() {
 	// There is no readLoop for RPC, delete the session here
 	defer func() {
-		log.Println("writeRPC - stop")
 		sess.closeRPC()
 		globals.sessionStore.Delete(sess)
 		sess.unsubAll()
 	}()
+
+	// Timer which checks for orphaned nodes.
+	heartBeat := time.NewTimer(clusterSessionCleanup)
 
 	for {
 		select {
@@ -738,20 +761,25 @@ func (sess *Session) rpcWriteLoop() {
 			}
 			// The error is returned if the remote node is down. Which means the remote
 			// session is also disconnected.
-			if err := sess.clnode.respond(&ClusterResp{Msg: msg.([]byte), FromSID: sess.sid}); err != nil {
-
-				log.Println("sess.writeRPC: " + err.Error())
+			if err := sess.clnode.respond(&ClusterResp{SrvMsg: msg.(*ServerComMessage), FromSID: sess.sid}); err != nil {
+				log.Println("cluster: sess.writeRPC: " + err.Error())
 				return
 			}
 		case msg := <-sess.stop:
 			// Shutdown is requested, don't care if the message is delivered
 			if msg != nil {
-				sess.clnode.respond(&ClusterResp{Msg: msg.([]byte), FromSID: sess.sid})
+				sess.clnode.respond(&ClusterResp{SrvMsg: msg.(*ServerComMessage), FromSID: sess.sid})
 			}
 			return
 
 		case topic := <-sess.detach:
 			sess.delSub(topic)
+
+		case <-heartBeat.C:
+			// All proxied subsriptions are gone, this session is no longer needed.
+			if sess.countSub() == 0 {
+				return
+			}
 		}
 	}
 }
@@ -759,7 +787,7 @@ func (sess *Session) rpcWriteLoop() {
 // Proxied session is being closed at the Master node
 func (sess *Session) closeRPC() {
 	if sess.proto == CLUSTER {
-		log.Println("cluster: session closed at master")
+		log.Println("cluster: session proxy closed", sess.sid)
 	}
 }
 
@@ -858,6 +886,14 @@ func (c *Cluster) invalidateRemoteSubs() {
 			}
 		}
 		s.remoteSubsLock.Unlock()
+		// FIXME:
+		// This is problematic for two reasons:
+		// 1. We don't really know if subscription contained in s.remoteSubs actually exists.
+		// We only know that {sub} packet was sent to the remote node and it was delivered.
+		// 2. The {pres what=term} is sent on 'me' topic but we don't know if the session is
+		// subscribed to 'me' topic. The correct way of doing it is to send to those online
+		// in the topic on topic itsef, to those offline on their 'me' topic. In general
+		// the 'presTermDirect' should not exist.
 		s.presTermDirect(topicsToTerminate)
 	}
 }

@@ -1,14 +1,22 @@
 #!/bin/bash
 
 # Cross-compiling script using https://github.com/mitchellh/gox
-# I use this to compile the Linux version of the server on my Mac.
+# This scripts build and archives binaries and supporting files.
+# If directory ./server/static exists, it's asumed to contain
+# TinodeWeb and then it's also copied and archived.
+
+# Check if gox is installed. Abort otherwise.
+command -v gox >/dev/null 2>&1 || {
+  echo >&2 "This script requires https://github.com/mitchellh/gox. Please install it before running."; exit 1;
+}
 
 # Supported OSs: darwin windows linux
 goplat=( darwin windows linux )
 # Supported CPU architectures: amd64
 goarc=( amd64 )
 # Supported database tags
-dbtags=( mysql mongodb rethinkdb )
+dbadapters=( mysql mongodb rethinkdb )
+dbtags=( ${dbadapters[@]} alldbs )
 
 for line in $@; do
   eval "$line"
@@ -40,7 +48,7 @@ do
     # Remove previous build
     rm -f $GOPATH/bin/keygen
     # Build
-    ~/go/bin/gox -osarch="${plat}/${arc}" -ldflags "-s -w" -output $GOPATH/bin/keygen ./keygen > /dev/null
+    gox -osarch="${plat}/${arc}" -ldflags "-s -w" -output $GOPATH/bin/keygen ./keygen > /dev/null
 
     for dbtag in "${dbtags[@]}"
     do
@@ -50,40 +58,54 @@ do
       rm -f $GOPATH/bin/tinode
       rm -f $GOPATH/bin/init-db
       # Build tinode server and database initializer for RethinkDb and MySQL.
-      ~/go/bin/gox -osarch="${plat}/${arc}" \
+      # For 'alldbs' tag, we compile in all available DB adapters.
+      if [ "$dbtag" = "alldbs" ]; then
+        buildtag="${dbadapters[@]}"
+      else
+        buildtag=$dbtag
+      fi
+      gox -osarch="${plat}/${arc}" \
         -ldflags "-s -w -X main.buildstamp=`git describe --tags`" \
-        -tags ${dbtag} -output $GOPATH/bin/tinode ./server > /dev/null
-      ~/go/bin/gox -osarch="${plat}/${arc}" \
+        -tags "${buildtag}" -output $GOPATH/bin/tinode ./server > /dev/null
+      gox -osarch="${plat}/${arc}" \
         -ldflags "-s -w" \
-        -tags ${dbtag} -output $GOPATH/bin/init-db ./tinode-db > /dev/null
+        -tags "${buildtag}" -output $GOPATH/bin/init-db ./tinode-db > /dev/null
 
       # Tar on Mac is inflexible about directories. Let's just copy release files to
       # one directory.
       rm -fR ./releases/tmp
-      mkdir -p ./releases/tmp/static/img
-      mkdir ./releases/tmp/static/css
-      mkdir ./releases/tmp/static/audio
-      mkdir ./releases/tmp/static/src
-      mkdir ./releases/tmp/static/umd
-      mkdir ./releases/tmp/templ
+      mkdir -p ./releases/tmp/templ
 
       # Copy templates and database initialization files
       cp ./server/tinode.conf ./releases/tmp
       cp ./server/templ/*.templ ./releases/tmp/templ
-      cp ./server/static/img/*.png ./releases/tmp/static/img
-      cp ./server/static/img/*.svg ./releases/tmp/static/img
-      cp ./server/static/audio/*.mp3 ./releases/tmp/static/audio
-      cp ./server/static/css/*.css ./releases/tmp/static/css
-      cp ./server/static/index.html ./releases/tmp/static
-      cp ./server/static/index-dev.html ./releases/tmp/static
-      cp ./server/static/umd/*.js ./releases/tmp/static/umd
-      cp ./server/static/manifest.json ./releases/tmp/static
-      cp ./server/static/service-worker.js ./releases/tmp/static
-      # Create empty FCM client-side config.
-      echo > ./releases/tmp/static/firebase-init.js
       cp ./tinode-db/data.json ./releases/tmp
       cp ./tinode-db/*.jpg ./releases/tmp
       cp ./tinode-db/credentials.sh ./releases/tmp
+
+      # Create directories for and copy TinodeWeb files.
+      if [[ -d ./server/static ]]
+      then
+        mkdir -p ./releases/tmp/static/img
+        mkdir ./releases/tmp/static/css
+        mkdir ./releases/tmp/static/audio
+        mkdir ./releases/tmp/static/src
+        mkdir ./releases/tmp/static/umd
+
+        cp ./server/static/img/*.png ./releases/tmp/static/img
+        cp ./server/static/img/*.svg ./releases/tmp/static/img
+        cp ./server/static/audio/*.mp3 ./releases/tmp/static/audio
+        cp ./server/static/css/*.css ./releases/tmp/static/css
+        cp ./server/static/index.html ./releases/tmp/static
+        cp ./server/static/index-dev.html ./releases/tmp/static
+        cp ./server/static/umd/*.js ./releases/tmp/static/umd
+        cp ./server/static/manifest.json ./releases/tmp/static
+        cp ./server/static/service-worker.js ./releases/tmp/static
+        # Create empty FCM client-side config.
+        echo > ./releases/tmp/static/firebase-init.js
+      else
+        echo "TinodeWeb not found, skipping"
+      fi
 
       # Build archive. All platforms but Windows use tar for archiving. Windows uses zip.
       if [ "$plat" = "windows" ]; then
@@ -124,12 +146,11 @@ echo "Building the binary for web.tinode.co"
 rm -f $GOPATH/bin/tinode
 rm -f $GOPATH/bin/init-db
 
-~/go/bin/gox -osarch=linux/amd64 \
+gox -osarch=linux/amd64 \
   -ldflags "-X main.buildstamp=`git describe --tags`" \
   -tags rethinkdb -output $GOPATH/bin/tinode ./server > /dev/null
-~/go/bin/gox -osarch=linux/amd64 \
+gox -osarch=linux/amd64 \
   -tags rethinkdb -output $GOPATH/bin/init-db ./tinode-db > /dev/null
-
 
 # Build chatbot release
 echo "Building python code..."
@@ -143,6 +164,7 @@ mkdir -p ./releases/tmp
 
 cp ${GOSRC}/chat/chatbot/python/chatbot.py ./releases/tmp
 cp ${GOSRC}/chat/chatbot/python/quotes.txt ./releases/tmp
+cp ${GOSRC}/chat/chatbot/python/requirements.txt ./releases/tmp
 
 tar -C ${GOSRC}/chat/releases/tmp -zcf ./releases/${version}/py-chatbot.tar.gz .
 pushd ./releases/tmp > /dev/null
@@ -155,7 +177,8 @@ echo "Packaging tn-cli..."
 rm -fR ./releases/tmp
 mkdir -p ./releases/tmp
 
-cp ${GOSRC}/chat/tn-cli/tn-cli.py ./releases/tmp
+cp ${GOSRC}/chat/tn-cli/*.py ./releases/tmp
+cp ${GOSRC}/chat/tn-cli/requirements.txt ./releases/tmp
 
 tar -C ${GOSRC}/chat/releases/tmp -zcf ./releases/${version}/tn-cli.tar.gz .
 pushd ./releases/tmp > /dev/null

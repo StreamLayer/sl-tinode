@@ -3,12 +3,11 @@
 package main
 
 import (
-	"bufio"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"net"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -338,48 +337,56 @@ func parseTopicAccess(acs *MsgDefaultAcsMode, defAuth, defAnon types.AccessMode)
 	return
 }
 
-// Parses version in the following formats:
-//  1.2 | 1.2abc | 1.2.3 | 1.2.3abc
-// The major and minor parts must be valid, the trailer is ignored if missing or unparceable.
-func parseVersion(vers string) int {
-	var major, minor, trailer int
-	var err error
-
-	dot := strings.Index(vers, ".")
-	if dot < 0 {
-		major, err = strconv.Atoi(vers)
-		if err != nil || major > 0x1fff || major < 0 {
-			return 0
-		}
-		return major << 16
-	}
-
-	major, err = strconv.Atoi(vers[:dot])
-	if err != nil {
-		return 0
-	}
-
-	vers = vers[dot+1:]
-	dot2 := strings.IndexFunc(vers, func(r rune) bool {
+// Parse one component of a semantic version string.
+func parseVersionPart(vers string) int {
+	end := strings.IndexFunc(vers, func(r rune) bool {
 		return !unicode.IsDigit(r)
 	})
 
-	if dot2 > 0 {
-		minor, err = strconv.Atoi(vers[:dot2])
-		// Ignoring the error here
-		trailer, _ = strconv.Atoi(vers[dot2+1:])
+	t := 0
+	var err error
+	if end > 0 {
+		t, err = strconv.Atoi(vers[:end])
 	} else if len(vers) > 0 {
-		minor, err = strconv.Atoi(vers)
+		t, err = strconv.Atoi(vers)
 	}
-	if err != nil {
+	if err != nil || t > 0x1fff || t <= 0 {
 		return 0
 	}
+	return t
+}
 
-	if major < 0 || minor < 0 || trailer < 0 || major > 0x1fff || minor >= 0xff || trailer >= 0xff {
-		return 0
+// Parses semantic version string in the following formats:
+//  1.2, 1.2abc, 1.2.3, 1.2.3-abc, v0.12.34-rc5
+// Unparceable values are replaced with zeros.
+func parseVersion(vers string) int {
+	var major, minor, patch int
+	// Remove optional "v" prefix.
+	if strings.HasPrefix(vers, "v") {
+		vers = vers[1:]
+	}
+	// We can handle 3 parts only.
+	parts := strings.SplitN(vers, ".", 3)
+	count := len(parts)
+	if count > 0 {
+		major = parseVersionPart(parts[0])
+		if count > 1 {
+			minor = parseVersionPart(parts[1])
+			if count > 2 {
+				patch = parseVersionPart(parts[2])
+			}
+		}
 	}
 
-	return (major << 16) | (minor << 8) | trailer
+	return (major << 16) | (minor << 8) | patch
+}
+
+// Version as a base-10 number. Used by monitoring.
+func base10Version(hex int) int64 {
+	major := hex >> 16 & 0xFF
+	minor := hex >> 8 & 0xFF
+	trailer := hex & 0xFF
+	return int64(major*10000 + minor*100 + trailer)
 }
 
 func versionToString(vers int) string {
@@ -737,37 +744,18 @@ func mergeMaps(dst, src map[string]interface{}) (map[string]interface{}, bool) {
 	return dst, changed
 }
 
-// Calculate line and character position from byte offset into a file.
-func offsetToLineAndChar(r io.Reader, offset int64) (int, int, error) {
-	if offset < 0 {
-		return -1, -1, errors.New("offset value cannot be negative")
+// netListener creates net.Listener for tcp and unix domains:
+// if addr is is in the form "unix:/run/tinode.sock" it's a unix socket, otherwise TCP host:port.
+func netListener(addr string) (net.Listener, error) {
+	addrParts := strings.SplitN(addr, ":", 2)
+	if len(addrParts) == 2 && addrParts[0] == "unix" {
+		return net.Listen("unix", addrParts[1])
 	}
+	return net.Listen("tcp", addr)
+}
 
-	br := bufio.NewReader(r)
-
-	// Count lines and characters.
-	lnum := 1
-	cnum := 0
-	// Number of bytes consumed.
-	var count int64
-	for {
-		ch, size, err := br.ReadRune()
-		if err == io.EOF {
-			return -1, -1, errors.New("offset value too large")
-		}
-		count += int64(size)
-
-		if ch == '\n' {
-			lnum++
-			cnum = 0
-		} else {
-			cnum++
-		}
-
-		if count >= offset {
-			break
-		}
-	}
-
-	return lnum, cnum, nil
+// Check if specified address is a unix socket like "unix:/run/tinode.sock".
+func isUnixAddr(addr string) bool {
+	addrParts := strings.SplitN(addr, ":", 2)
+	return len(addrParts) == 2 && addrParts[0] == "unix"
 }
