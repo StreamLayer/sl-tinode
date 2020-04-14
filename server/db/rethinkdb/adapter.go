@@ -889,16 +889,20 @@ func (a *adapter) UserUpdateTags(uid t.Uid, add, remove, reset []string) ([]stri
 		return nil, err
 	}
 
-	// Get the new tags
-	cursor, err := q.Field("Tags").Run(a.conn)
+	// Get the new tags.
+	// Using Pluck instead of Field because of https://github.com/rethinkdb/rethinkdb-go/issues/486
+	cursor, err := q.Pluck("Tags").Run(a.conn)
 	if err != nil {
 		return nil, err
 	}
 	defer cursor.Close()
 
-	var tags []string
-	err = cursor.One(&tags)
-	return tags, err
+	var tagsField struct{ Tags []string }
+	err = cursor.One(&tagsField)
+	if err != nil {
+		return nil, err
+	}
+	return tagsField.Tags, nil
 }
 
 // UserGetByCred returns user ID for the given validated credential.
@@ -1108,8 +1112,9 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 		for cursor.Next(&top) {
 			sub = join[top.Id]
 			sub.ObjHeader.MergeTimes(&top.ObjHeader)
-			sub.SetSeqId(top.SeqId)
+			sub.SetState(top.State)
 			sub.SetTouchedAt(top.TouchedAt)
+			sub.SetSeqId(top.SeqId)
 			if t.GetTopicCat(sub.Topic) == t.TopicCatGrp {
 				// all done with a grp topic
 				sub.SetPublic(top.Public)
@@ -1138,6 +1143,7 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 			uid2 := t.ParseUid(usr.Id)
 			if sub, ok := join[uid.P2PName(uid2)]; ok {
 				sub.ObjHeader.MergeTimes(&usr.ObjHeader)
+				sub.SetState(usr.State)
 				sub.SetPublic(usr.Public)
 				sub.SetWith(uid2.UserId())
 				sub.SetDefaultAccess(usr.Access.Auth, usr.Access.Anon)
