@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/tinode/chat/server/drafty"
-	"github.com/tinode/chat/server/store"
 	"strconv"
 	"time"
 
-	t "github.com/tinode/chat/server/store/types"
+	"github.com/tinode/chat/server/drafty"
+	"github.com/tinode/chat/server/store"
+
 	"log"
 	"net/http"
+
+	t "github.com/tinode/chat/server/store/types"
 
 	"github.com/tinode/chat/server/push"
 )
@@ -28,9 +30,9 @@ type httpPush struct {
 }
 
 type configType struct {
-	Enabled bool `json:"enabled"`
-	Buffer  int  `json:"buffer"`
-	Url  string  `json:"url"`
+	Enabled bool   `json:"enabled"`
+	Buffer  int    `json:"buffer"`
+	Url     string `json:"url"`
 }
 
 // Init initializes the handler
@@ -77,8 +79,8 @@ func (httpPush) Init(jsonconf string) error {
 
 func messagePayload(payload *push.Payload) map[string]string {
 	data := make(map[string]string)
-	data["topic"] = payload.Topic.String()
-	data["from"] = payload.From.String()
+	data["topic"] = payload.Topic
+	data["from"] = payload.From
 	data["ts"] = payload.Timestamp.Format(time.RFC3339)
 	data["seq"] = strconv.Itoa(payload.SeqId)
 	data["mime"] = payload.ContentType
@@ -97,12 +99,12 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 
 	/*
 	* Sender user data
-	*/
+	 */
 	sender, _ := store.Users.Get(t.ParseUserId(msg.Payload.From))
 
 	/*
 	* Recipients list with user data, and conversation status
-	*/
+	 */
 	recipientsList, _ := store.Users.GetAll(recipientsIds...)
 	recipients := map[string]map[string]interface{}{}
 	for _, r := range recipientsList {
@@ -117,7 +119,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 
 	/*
 	* Generate payload
-	*/
+	 */
 	data := make(map[string]interface{})
 	data["recipients"] = recipients
 	data["sender"] = sender
@@ -127,7 +129,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 
 	/*
 	* Send push through http
-	*/
+	 */
 	log.Print("Sent HTTP push from: ", sender.Id, "to: ", recipientsIds)
 	_, err := http.Post(url, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
