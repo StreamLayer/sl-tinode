@@ -253,6 +253,12 @@ func (s *Session) queueOut(msg *ServerComMessage) bool {
 		return s.multi.queueOut(msg)
 	}
 
+	// Record latency only on {ctrl} messages and end-user sessions.
+	if msg.Ctrl != nil && msg.Id != "" && !msg.Ctrl.Timestamp.IsZero() && !s.isCluster() {
+		duration := time.Since(msg.Ctrl.Timestamp).Milliseconds()
+		statsAddHistSample("RequestLatency", float64(duration))
+	}
+
 	select {
 	case s.send <- s.serialize(msg):
 	case <-time.After(sendTimeout):
@@ -585,6 +591,8 @@ func (s *Session) hello(msg *ClientComMessage) {
 			"build":              store.GetAdapterName() + ":" + buildstamp,
 			"maxMessageSize":     globals.maxMessageSize,
 			"maxSubscriberCount": globals.maxSubscriberCount,
+			"minTagLength":       minTagLength,
+			"maxTagLength":       maxTagLength,
 			"maxTagCount":        globals.maxTagCount,
 			"maxFileUploadSize":  globals.maxFileUploadSize,
 		}
@@ -976,9 +984,9 @@ func (s *Session) del(msg *ClientComMessage) {
 		// Hub will forward to topic, if appropriate.
 		globals.hub.unreg <- &topicUnreg{
 			rcptTo: msg.RcptTo,
-			pkt:  msg,
-			sess: s,
-			del:  true}
+			pkt:    msg,
+			sess:   s,
+			del:    true}
 	} else {
 		// Must join the topic to delete messages or subscriptions.
 		s.queueOut(ErrAttachFirst(msg.Id, msg.Original, msg.timestamp))

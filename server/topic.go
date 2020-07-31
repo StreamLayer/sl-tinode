@@ -366,14 +366,16 @@ func (t *Topic) runLocal(hub *Hub) {
 					}
 
 					meUid := uid
-					if meUid.IsZero() {
+					if meUid.IsZero() && len(pssd.muids) > 0 {
 						// The entire multiplexing session is being dropped. Need to find owner's UID.
-						// May panic only if pssd.muids is empty, but it should not be empty at this point.
+						// len(pssd.muids) could be zero if the session was a background session.
 						meUid = pssd.muids[0]
 					}
-					// Update user's last online timestamp & user agent. Only one user can be subscribed to 'me' topic.
-					if err := store.Users.UpdateLastSeen(meUid, mrs.userAgent, now); err != nil {
-						log.Println(err)
+					if !meUid.IsZero() {
+						// Update user's last online timestamp & user agent. Only one user can be subscribed to 'me' topic.
+						if err := store.Users.UpdateLastSeen(meUid, mrs.userAgent, now); err != nil {
+							log.Println(err)
+						}
 					}
 				case types.TopicCatFnd:
 					// FIXME: this does not work correctly in case of a multiplexing query.
@@ -1246,6 +1248,7 @@ func (t *Topic) thisUserSub(h *Hub, sess *Session, asUid types.Uid, asLvl auth.L
 		// No transactions in RethinkDB, but two owners are better than none
 		if ownerChange {
 			oldOwnerData := t.perUser[t.owner]
+			oldOwnerOldWant, oldOwnerOldGiven := oldOwnerData.modeWant, oldOwnerData.modeGiven
 			oldOwnerData.modeGiven = (oldOwnerData.modeGiven & ^types.ModeOwner)
 			oldOwnerData.modeWant = (oldOwnerData.modeWant & ^types.ModeOwner)
 			if err := store.Subs.Update(t.name, t.owner,
@@ -1258,6 +1261,8 @@ func (t *Topic) thisUserSub(h *Hub, sess *Session, asUid types.Uid, asLvl auth.L
 				return changed, err
 			}
 			t.perUser[t.owner] = oldOwnerData
+			// Send presence notifications
+			t.notifySubChange(t.owner, asUid, oldOwnerOldWant, oldOwnerOldGiven, oldOwnerData.modeWant, oldOwnerData.modeGiven, "")
 			t.owner = asUid
 		}
 	}
@@ -1992,7 +1997,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 		sess.queueOut(&ServerComMessage{Meta: meta})
 	} else {
 		// Inform the client that there are no subscriptions.
-		sess.queueOut(NoErrParams(id, t.original(asUid), now, map[string]interface{}{"what": "sub"}))
+		sess.queueOut(NoContentParams(id, t.original(asUid), now, map[string]interface{}{"what": "sub"}))
 	}
 
 	return nil
@@ -2118,7 +2123,7 @@ func (t *Topic) replyGetTags(sess *Session, asUid types.Uid, id string) error {
 	}
 
 	// Inform the requester that there are no tags.
-	sess.queueOut(NoErrParams(id, t.original(asUid), now, map[string]string{"what": "tags"}))
+	sess.queueOut(NoContentParams(id, t.original(asUid), now, map[string]string{"what": "tags"}))
 
 	return nil
 }
@@ -2206,7 +2211,7 @@ func (t *Topic) replyGetCreds(sess *Session, asUid types.Uid, id string) error {
 	}
 
 	// Inform the requester that there are no credentials.
-	sess.queueOut(NoErrParams(id, t.original(asUid), now, map[string]string{"what": "creds"}))
+	sess.queueOut(NoContentParams(id, t.original(asUid), now, map[string]string{"what": "creds"}))
 
 	return nil
 }
@@ -2278,7 +2283,7 @@ func (t *Topic) replyGetDel(sess *Session, asUid types.Uid, id string, req *MsgG
 		}
 	}
 
-	sess.queueOut(NoErrParams(id, toriginal, now, map[string]string{"what": "del"}))
+	sess.queueOut(NoContentParams(id, toriginal, now, map[string]string{"what": "del"}))
 
 	return nil
 }

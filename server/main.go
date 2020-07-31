@@ -316,7 +316,11 @@ func main() {
 	}
 	statsInit(mux, evpath)
 	statsRegisterInt("Version")
-	statsSet("Version", base10Version(parseVersion(currentVersion)))
+	decVersion := base10Version(parseVersion(buildstamp))
+	if decVersion <= 0 {
+		decVersion = base10Version(parseVersion(currentVersion))
+	}
+	statsSet("Version", decVersion)
 
 	// Initialize serving debug profiles (optional).
 	servePprof(mux, *pprofUrl)
@@ -380,7 +384,7 @@ func main() {
 			}
 			tags, err := authhdl.RestrictedTags()
 			if err != nil {
-				log.Fatalln("Failed get restricted tag namespaces", name+":", err)
+				log.Fatalln("Failed get restricted tag namespaces (prefixes)", name+":", err)
 			}
 			for _, tag := range tags {
 				if strings.Contains(tag, ":") {

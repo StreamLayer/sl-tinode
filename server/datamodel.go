@@ -73,7 +73,7 @@ type MsgCredClient struct {
 	// Verification response
 	Response string `json:"resp,omitempty"`
 	// Request parameters, such as preferences. Passed to valiator without interpretation.
-	Params interface{} `json:"params,omitempty"`
+	Params map[string]interface{} `json:"params,omitempty"`
 }
 
 // MsgSetQuery is an update to topic metadata: Desc, subscriptions, or tags.
@@ -849,6 +849,17 @@ func NoErrAccepted(id, topic string, ts time.Time) *ServerComMessage {
 		Code:      http.StatusAccepted, // 202
 		Text:      "accepted",
 		Topic:     topic,
+		Timestamp: ts}, Id: id}
+}
+
+// NoContentParams indicates request was processed but resulted in no content (204).
+func NoContentParams(id, topic string, ts time.Time, params interface{}) *ServerComMessage {
+	return &ServerComMessage{Ctrl: &MsgServerCtrl{
+		Id:        id,
+		Code:      http.StatusNoContent, // 204
+		Text:      "no content",
+		Topic:     topic,
+		Params:    params,
 		Timestamp: ts}, Id: id}
 }
 
