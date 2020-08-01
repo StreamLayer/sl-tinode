@@ -1839,7 +1839,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 						// FIXME: allow root to find suspended users and topics.
 						subs, err = store.Users.FindSubs(asUid, req, opt)
 						if err != nil {
-							sess.queueOut(decodeStoreError(err, id, t.original(asUid), now, incomingReqTs, nil))
+							sess.queueOut(decodeStoreErrorExplicitTs(err, id, t.original(asUid), now, incomingReqTs, nil))
 							return err
 						}
 
@@ -1877,7 +1877,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 	}
 
 	if err != nil {
-		sess.queueOut(decodeStoreError(err, id, t.original(asUid), now, incomingReqTs, nil))
+		sess.queueOut(decodeStoreErrorExplicitTs(err, id, t.original(asUid), now, incomingReqTs, nil))
 		return err
 	}
 
@@ -2221,7 +2221,7 @@ func (t *Topic) replyGetCreds(sess *Session, asUid types.Uid, id string, incomin
 
 	screds, err := store.Users.GetAllCreds(asUid, "", false)
 	if err != nil {
-		sess.queueOut(decodeStoreError(err, id, t.original(asUid), now, incomingReqTs, nil))
+		sess.queueOut(decodeStoreErrorExplicitTs(err, id, t.original(asUid), now, incomingReqTs, nil))
 		return err
 	}
 
@@ -2271,7 +2271,7 @@ func (t *Topic) replySetCred(sess *Session, asUid types.Uid, incomingReqTs time.
 		t.presSubsOnline("tags", "", nilPresParams, nilPresFilters, "")
 	}
 
-	sess.queueOut(decodeStoreError(err, set.Id, t.original(asUid), now, incomingReqTs, nil))
+	sess.queueOut(decodeStoreErrorExplicitTs(err, set.Id, t.original(asUid), now, incomingReqTs, nil))
 
 	return err
 }
@@ -2466,7 +2466,7 @@ func (t *Topic) replyDelCred(h *Hub, sess *Session, asUid types.Uid, incomingReq
 		sess.queueOut(InfoNoAction(del.Id, del.Topic, now, incomingReqTs))
 		return nil
 	}
-	sess.queueOut(decodeStoreError(err, del.Id, del.Topic, now, incomingReqTs, nil))
+	sess.queueOut(decodeStoreErrorExplicitTs(err, del.Id, del.Topic, now, incomingReqTs, nil))
 	return err
 }
 
