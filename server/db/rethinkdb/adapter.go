@@ -14,7 +14,7 @@ import (
 	"github.com/tinode/chat/server/auth"
 	"github.com/tinode/chat/server/store"
 	t "github.com/tinode/chat/server/store/types"
-	rdb "gopkg.in/rethinkdb/rethinkdb-go.v5"
+	rdb "gopkg.in/rethinkdb/rethinkdb-go.v6"
 )
 
 // adapter holds RethinkDb connection data.
@@ -57,7 +57,7 @@ type configType struct {
 	InitialCap        int         `json:"initial_cap,omitempty"`
 	MaxOpen           int         `json:"max_open,omitempty"`
 	DiscoverHosts     bool        `json:"discover_hosts,omitempty"`
-	HostDecayDuration int         `json:"host_decay_duration,omitempty"`
+	HostDecayDuration int         `json	:"host_decay_duration,omitempty"`
 }
 
 // Open initializes rethinkdb session

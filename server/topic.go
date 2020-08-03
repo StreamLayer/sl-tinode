@@ -381,6 +381,9 @@ func (t *Topic) runLocal(hub *Hub) {
 					// Remove ephemeral query.
 					t.fndRemovePublic(leave.sess)
 				case types.TopicCatGrp:
+
+					log.Printf("topic[%s] leaving sid=%s, pud=%v", t.name, leave.sess.sid, pud.online)
+
 					// Topic is going offline: notify online subscribers on 'me'.
 					readFilter := &presFilters{filterIn: types.ModeRead}
 					if !uid.IsZero() {
@@ -584,6 +587,8 @@ func (t *Topic) handleSubscription(h *Hub, join *sessionJoin) error {
 		return err
 	}
 
+	log.Printf("topic[%s] subscribed, sid=%s", t.name, join.sess.sid)
+
 	// Send notifications.
 
 	// Some notifications are always sent immediately.
@@ -737,6 +742,9 @@ func (t *Topic) sendSubNotifications(asUid types.Uid, sid, userAgent string) {
 		if !t.isLoaded() {
 			t.markLoaded()
 			status := "on"
+
+			log.Printf("topic[%s] first user online from sid=%s on unloaded topic", t.name, sid)
+
 			if (pud.modeGiven & pud.modeWant).IsPresencer() {
 				status += "+en"
 			}
@@ -744,10 +752,15 @@ func (t *Topic) sendSubNotifications(asUid types.Uid, sid, userAgent string) {
 			// Notify topic subscribers that the topic is online now.
 			t.presSubsOffline(status, nilPresParams, nilPresFilters, nilPresFilters, "", false)
 		} else if pud.online == 1 {
+			log.Printf("topic[%s] first user online from sid=%s", t.name, sid)
+
 			// If this is the first session of the user in the topic.
 			// Notify other online group members that the user is online now.
 			t.presSubsOnline("on", asUid.UserId(), nilPresParams,
 				&presFilters{filterIn: types.ModeRead}, sid)
+
+			// t.presSubsOffline("on", &presParams{actor: asUid.UserId()}, nilPresFilters,
+			// 	&presFilters{filterIn: types.ModePres}, sid, false)
 		}
 	}
 }
@@ -831,11 +844,13 @@ func (t *Topic) handleBroadcast(msg *ServerComMessage) {
 		what := t.presProcReq(msg.Pres.Src, msg.Pres.What, msg.Pres.WantReply)
 		if t.xoriginal != msg.Pres.Topic || what == "" {
 			// This is just a request for status, don't forward it to sessions
+			log.Printf("topic[%s]: msg.Pres skipped: '%s'", t.name, what)
 			return
 		}
 
 		// "what" may have changed, i.e. unset or "+command" removed ("on+en" -> "on")
 		msg.Pres.What = what
+		log.Printf("topic[%s]: msg.Pres processed: %s", t.name, what)
 	} else if msg.Info != nil {
 		if msg.Info.SeqId > t.lastID {
 			// Drop bogus read notification
@@ -951,6 +966,11 @@ func (t *Topic) handleBroadcast(msg *ServerComMessage) {
 
 		// Topic name may be different depending on the user to which the `sess` belongs.
 		t.maybeFixTopicName(msg, pssd.uid)
+
+		if msg.Pres != nil {
+			log.Printf("Topic[%s] Sending pres to %s: %v", t.name, sess.sid, msg.Pres)
+		}
+
 		if !sess.queueOut(msg) {
 			log.Println("topic: connection stuck, detaching", t.name, sess.sid)
 			// The whole session is being dropped, so sessionLeave.pkt is not set.
@@ -2745,7 +2765,7 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receip
 			Timestamp:   data.Timestamp,
 			SeqId:       data.SeqId,
 			ContentType: contentType,
-			Head:      data.Head,
+			Head:        data.Head,
 			Content:     data.Content}}
 
 	for uid, pud := range t.perUser {
