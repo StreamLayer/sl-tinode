@@ -42,6 +42,7 @@ func (*grpcNodeServer) MessageLoop(stream pbx.Node_MessageLoopServer) error {
 	log.Println("grpc: session started", sess.sid, sess.remoteAddr, count)
 
 	defer func() {
+		log.Println("grpc: cleanup", sess.sid)
 		sess.closeGrpc()
 		sess.cleanUp(false)
 	}()
