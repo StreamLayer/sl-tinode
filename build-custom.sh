@@ -46,7 +46,8 @@ do
 
     # Build
     $GOPATH/bin/gox -osarch="${plat}/${arc}" \
-      -ldflags "-s -w -extldflags \"-static\"" \
+      -ldflags "-s -w -extldflags \"-fno-PIC -static\"" \
+      -tags 'osusergo netgo static_build' \
       -output $GOPATH/bin/keygen ./keygen > /dev/null
 
     for dbtag in "${dbtags[@]}"
@@ -60,12 +61,14 @@ do
 
       # Build tinode server and database initializer for RethinkDb and MySQL.
       $GOPATH/bin/gox -osarch="${plat}/${arc}" \
-        -ldflags "-s -w -extldflags \"-static\" -X main.buildstamp=${version}" \
-        -tags ${dbtag} -output $GOPATH/bin/tinode ./server > /dev/null
+        -ldflags "-s -w -extldflags \"-fno-PIC -static\" -X main.buildstamp=${version}" \
+        -tags "${dbtag} osusergo netgo static_build" \
+        -output $GOPATH/bin/tinode ./server > /dev/null
 
       $GOPATH/bin/gox -osarch="${plat}/${arc}" \
-        -ldflags "-s -w -extldflags \"-static\"" \
-        -tags ${dbtag} -output $GOPATH/bin/init-db ./tinode-db > /dev/null
+        -ldflags "-s -w -extldflags \"-fno-PIC -static\"" \
+        -tags "${dbtag} osusergo netgo static_build" \
+        -output $GOPATH/bin/init-db ./tinode-db > /dev/null
 
       # Tar on Mac is inflexible about directories. Let's just copy release files to
       # one directory.
