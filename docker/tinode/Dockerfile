@@ -9,7 +9,7 @@
 #	--env AUTH_TOKEN_KEY=base64+encoded+32+bytes \
 #	tinode-server
 
-FROM alpine:3.11
+FROM alpine:3.12
 
 ARG VERSION=0.16
 ENV VERSION=$VERSION
@@ -135,5 +135,5 @@ RUN chmod +x credentials.sh
 # Generate config from template and run the server.
 ENTRYPOINT ./entrypoint.sh
 
-# HTTP and gRPC ports
+# HTTP, gRPC
 EXPOSE 18080 16061
