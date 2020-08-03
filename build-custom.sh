@@ -43,8 +43,11 @@ do
     # Keygen is database-independent
     # Remove previous build
     rm -f $GOPATH/bin/keygen
+
     # Build
-    $GOPATH/bin/gox -osarch="${plat}/${arc}" -ldflags "-s -w" -output $GOPATH/bin/keygen ./keygen > /dev/null
+    $GOPATH/bin/gox -osarch="${plat}/${arc}" \
+      -ldflags "-s -w -extldflags \"-static\"" \
+      -output $GOPATH/bin/keygen ./keygen > /dev/null
 
     for dbtag in "${dbtags[@]}"
     do
@@ -54,12 +57,14 @@ do
       # Remove previous builds
       rm -f $GOPATH/bin/tinode
       rm -f $GOPATH/bin/init-db
+
       # Build tinode server and database initializer for RethinkDb and MySQL.
       $GOPATH/bin/gox -osarch="${plat}/${arc}" \
-        -ldflags "-s -w -X main.buildstamp=${version}" \
+        -ldflags "-s -w -extldflags \"-static\" -X main.buildstamp=${version}" \
         -tags ${dbtag} -output $GOPATH/bin/tinode ./server > /dev/null
+
       $GOPATH/bin/gox -osarch="${plat}/${arc}" \
-        -ldflags "-s -w" \
+        -ldflags "-s -w -extldflags \"-static\"" \
         -tags ${dbtag} -output $GOPATH/bin/init-db ./tinode-db > /dev/null
 
       # Tar on Mac is inflexible about directories. Let's just copy release files to
