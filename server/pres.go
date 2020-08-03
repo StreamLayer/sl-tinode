@@ -112,12 +112,15 @@ func (t *Topic) presProcReq(fromUserID, what string, wantReply bool) string {
 		cmd = parts[1]
 	}
 
+	log.Printf("topic[%s]: proc command: %s - %s", t.name, what, cmd)
+
 	switch what {
 	case "on":
 		// online
 		*online = true
 	case "off":
 		// offline
+		*online = false
 	case "?none":
 		// no change to online status
 		online = nil
@@ -139,6 +142,8 @@ func (t *Topic) presProcReq(fromUserID, what string, wantReply bool) string {
 
 		// Find if the contact is listed.
 		if psd, ok := t.perSubs[fromUserID]; ok {
+
+			log.Printf("topic[%s]: cmd - %s, psd[%s] - %v", t.name, cmd, fromUserID, psd)
 
 			if cmd == "rem" {
 				replyAs = "off+rem"

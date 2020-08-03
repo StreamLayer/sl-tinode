@@ -8,7 +8,7 @@ goplat=( linux )
 goarc=( amd64 )
 dbtags=( rethinkdb )
 releasepath="./docker/tinode/releases"
-repository="makeomatic"
+repository="gcr.io/peak-orbit-214114"
 
 export GOPATH=`go env GOPATH`
 
