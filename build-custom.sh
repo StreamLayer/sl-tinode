@@ -17,6 +17,7 @@ for line in $@; do
 done
 
 version=${tag#?}
+push=${push:-true}
 
 if [ -z "$version" ]; then
     echo "Must provide tag as 'tag=v1.2.3'"
@@ -122,7 +123,13 @@ for dbtag in "${dbtags[@]}"
 do
   rmitags="${repository}/tinode-${dbtag}:${version}"
 
-  docker rmi ${rmitags} -f
+  if [ x"$push" = x"true" ]; then
+    docker rmi ${rmitags} -f
+  fi
+  
   docker build --build-arg VERSION=$version --build-arg TARGET_DB=${dbtag} --tag ${rmitags} docker/tinode
-  docker push $rmitags
+
+  if [ x"$push" = x"true" ]; then
+    docker push $rmitags
+  fi
 done

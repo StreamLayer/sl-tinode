@@ -3006,7 +3006,7 @@ func (t *Topic) subsCount() int {
 }
 
 // Add session record. 'user' may be different from sess.uid.
-func (t *Topic) addSession(sess *Session, asUid types.Uid) {
+func (t *Topic) addSession(sess *Session, asUid types.Uid) bool {
 	s := sess
 	if sess.multi != nil {
 		s = s.multi
@@ -3018,9 +3018,11 @@ func (t *Topic) addSession(sess *Session, asUid types.Uid) {
 			// This slice is expected to be relatively short.
 			// Not doing anything fancy here like maps or sorting.
 			pssd.muids = append(pssd.muids, asUid)
+			return true
 		}
+
 		// Maybe panic here.
-		return
+		return false
 	}
 
 	if s.isMultiplex() {
@@ -3032,6 +3034,8 @@ func (t *Topic) addSession(sess *Session, asUid types.Uid) {
 	} else {
 		t.sessions[s] = perSessionData{uid: asUid}
 	}
+
+	return true
 }
 
 // Disconnects session from topic if either one of the following is true:
