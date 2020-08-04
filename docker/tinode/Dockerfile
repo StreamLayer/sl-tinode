@@ -135,5 +135,5 @@ RUN chmod +x credentials.sh
 # Generate config from template and run the server.
 ENTRYPOINT ./entrypoint.sh
 
-# HTTP, gRPC
-EXPOSE 18080 16061
+# HTTP, gRPC, prometheus
+EXPOSE 18080 16061 15020
