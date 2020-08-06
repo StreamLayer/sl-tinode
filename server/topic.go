@@ -381,9 +381,6 @@ func (t *Topic) runLocal(hub *Hub) {
 					// Remove ephemeral query.
 					t.fndRemovePublic(leave.sess)
 				case types.TopicCatGrp:
-
-					log.Printf("topic[%s] leaving sid=%s, pud=%v", t.name, leave.sess.sid, pud.online)
-
 					// Topic is going offline: notify online subscribers on 'me'.
 					readFilter := &presFilters{filterIn: types.ModeRead}
 					if !uid.IsZero() {
@@ -587,8 +584,6 @@ func (t *Topic) handleSubscription(h *Hub, join *sessionJoin) error {
 		return err
 	}
 
-	log.Printf("topic[%s] subscribed, sid=%s", t.name, join.sess.sid)
-
 	// Send notifications.
 
 	// Some notifications are always sent immediately.
@@ -742,9 +737,6 @@ func (t *Topic) sendSubNotifications(asUid types.Uid, sid, userAgent string) {
 		if !t.isLoaded() {
 			t.markLoaded()
 			status := "on"
-
-			log.Printf("topic[%s] first user online from sid=%s on unloaded topic", t.name, sid)
-
 			if (pud.modeGiven & pud.modeWant).IsPresencer() {
 				status += "+en"
 			}
@@ -752,15 +744,10 @@ func (t *Topic) sendSubNotifications(asUid types.Uid, sid, userAgent string) {
 			// Notify topic subscribers that the topic is online now.
 			t.presSubsOffline(status, nilPresParams, nilPresFilters, nilPresFilters, "", false)
 		} else if pud.online == 1 {
-			log.Printf("topic[%s] first user online from sid=%s", t.name, sid)
-
 			// If this is the first session of the user in the topic.
 			// Notify other online group members that the user is online now.
 			t.presSubsOnline("on", asUid.UserId(), nilPresParams,
 				&presFilters{filterIn: types.ModeRead}, sid)
-
-			// t.presSubsOffline("on", &presParams{actor: asUid.UserId()}, nilPresFilters,
-			// 	&presFilters{filterIn: types.ModePres}, sid, false)
 		}
 	}
 }
@@ -844,13 +831,11 @@ func (t *Topic) handleBroadcast(msg *ServerComMessage) {
 		what := t.presProcReq(msg.Pres.Src, msg.Pres.What, msg.Pres.WantReply)
 		if t.xoriginal != msg.Pres.Topic || what == "" {
 			// This is just a request for status, don't forward it to sessions
-			log.Printf("topic[%s]: msg.Pres skipped: '%s'", t.name, what)
 			return
 		}
 
 		// "what" may have changed, i.e. unset or "+command" removed ("on+en" -> "on")
 		msg.Pres.What = what
-		log.Printf("topic[%s]: msg.Pres processed: %s", t.name, what)
 	} else if msg.Info != nil {
 		if msg.Info.SeqId > t.lastID {
 			// Drop bogus read notification
@@ -966,11 +951,6 @@ func (t *Topic) handleBroadcast(msg *ServerComMessage) {
 
 		// Topic name may be different depending on the user to which the `sess` belongs.
 		t.maybeFixTopicName(msg, pssd.uid)
-
-		if msg.Pres != nil {
-			log.Printf("Topic[%s] Sending pres to %s: %v", t.name, sess.sid, msg.Pres)
-		}
-
 		if !sess.queueOut(msg) {
 			log.Println("topic: connection stuck, detaching", t.name, sess.sid)
 			// The whole session is being dropped, so sessionLeave.pkt is not set.
@@ -1031,6 +1011,21 @@ func (t *Topic) subscriptionReply(h *Hub, join *sessionJoin) error {
 	// Create new subscription or modify an existing one.
 	if changed, err = t.thisUserSub(h, join.sess, asUid, asLvl, mode, join.pkt, private); err != nil {
 		return err
+	}
+
+	// Subscription successfully created. Link topic to session.
+	join.sess.addSub(t.name, &Subscription{
+		broadcast: t.broadcast,
+		done:      t.unreg,
+		meta:      t.meta,
+		supd:      t.supd})
+	t.addSession(join.sess, asUid)
+
+	// The user is online in the topic. Increment the counter if notifications are not deferred.
+	if !join.sess.background {
+		userData := t.perUser[asUid]
+		userData.online++
+		t.perUser[asUid] = userData
 	}
 
 	params := map[string]interface{}{}
@@ -1322,25 +1317,6 @@ func (t *Topic) thisUserSub(h *Hub, sess *Session, asUid types.Uid, asLvl auth.L
 		// User was banned
 		sess.queueOut(ErrPermissionDeniedReply(msg, now))
 		return changed, errors.New("topic access denied; user is banned")
-	}
-
-	// Subscription successfully created. Link topic to session.
-	sess.addSub(t.name, &Subscription{
-		broadcast: t.broadcast,
-		done:      t.unreg,
-		meta:      t.meta,
-		supd:      t.supd})
-
-	var newlyAttached = t.addSession(sess, asUid)
-
-	// The user is online in the topic. Increment the counter if notifications are not deferred.
-	if !sess.background {
-		if newlyAttached {
-			userData.online++
-		}
-
-		t.perUser[asUid] = userData
-		log.Printf("Incremented online count user=%v to=%v on sess=%s", asUid, userData.online, sess.sid)
 	}
 
 	return changed, nil
@@ -2059,7 +2035,7 @@ func (t *Topic) replySetSub(h *Hub, sess *Session, pkt *ClientComMessage) error 
 	var changed bool
 	if target == asUid {
 		// Request new subscription or modify own subscription
-		changed, err = t.thisUserSub(h, sess, asUid, asLvl, /*pkt.Id*/ set.Sub.Mode, pkt, nil)
+		changed, err = t.thisUserSub(h, sess, asUid, asLvl /*pkt.Id*/, set.Sub.Mode, pkt, nil)
 	} else {
 		// Request to approve/change someone's subscription
 		changed, err = t.anotherUserSub(h, sess, asUid, target, pkt)
@@ -2134,7 +2110,7 @@ func (t *Topic) replyGetData(sess *Session, asUid types.Uid, msg *ClientComMessa
 }
 
 // replyGetTags returns topic's tags - tokens used for discovery.
-func (t *Topic) replyGetTags(sess *Session, asUid types.Uid, msg *ClientComMessage/*, id string, incomingReqTs time.Time*/) error {
+func (t *Topic) replyGetTags(sess *Session, asUid types.Uid, msg *ClientComMessage /*, id string, incomingReqTs time.Time*/) error {
 	now := types.TimeNow()
 	id := msg.Id
 
@@ -2160,7 +2136,7 @@ func (t *Topic) replyGetTags(sess *Session, asUid types.Uid, msg *ClientComMessa
 }
 
 // replySetTags updates topic's tags - tokens used for discovery.
-func (t *Topic) replySetTags(sess *Session, asUid types.Uid, msg *ClientComMessage/*incomingReqTs time.Time, set *MsgClientSet*/) error {
+func (t *Topic) replySetTags(sess *Session, asUid types.Uid, msg *ClientComMessage /*incomingReqTs time.Time, set *MsgClientSet*/) error {
 	var resp *ServerComMessage
 	var err error
 	incomingReqTs := msg.Timestamp
@@ -2221,7 +2197,7 @@ func (t *Topic) replySetTags(sess *Session, asUid types.Uid, msg *ClientComMessa
 // replyGetCreds returns user's credentials such as email and phone numbers.
 func (t *Topic) replyGetCreds(sess *Session, asUid types.Uid, msg *ClientComMessage) error {
 	now := types.TimeNow()
-  id := msg.Id
+	id := msg.Id
 
 	if t.cat != types.TopicCatMe {
 		sess.queueOut(ErrOperationNotAllowedReply(msg, now))
@@ -2460,7 +2436,7 @@ func (t *Topic) replyDelTopic(h *Hub, sess *Session, asUid types.Uid, msg *Clien
 }
 
 // Delete credential
-func (t *Topic) replyDelCred(h *Hub, sess *Session, asUid types.Uid,  authLvl auth.Level, msg *ClientComMessage) error {
+func (t *Topic) replyDelCred(h *Hub, sess *Session, asUid types.Uid, authLvl auth.Level, msg *ClientComMessage) error {
 	now := types.TimeNow()
 	incomingReqTs := msg.Timestamp
 	del := msg.Del
@@ -2777,7 +2753,6 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receip
 			Timestamp:   data.Timestamp,
 			SeqId:       data.SeqId,
 			ContentType: contentType,
-			Head:        data.Head,
 			Content:     data.Content}}
 
 	for uid, pud := range t.perUser {
@@ -3018,7 +2993,7 @@ func (t *Topic) subsCount() int {
 }
 
 // Add session record. 'user' may be different from sess.uid.
-func (t *Topic) addSession(sess *Session, asUid types.Uid) bool {
+func (t *Topic) addSession(sess *Session, asUid types.Uid) {
 	s := sess
 	if sess.multi != nil {
 		s = s.multi
@@ -3030,11 +3005,9 @@ func (t *Topic) addSession(sess *Session, asUid types.Uid) bool {
 			// This slice is expected to be relatively short.
 			// Not doing anything fancy here like maps or sorting.
 			pssd.muids = append(pssd.muids, asUid)
-			return true
 		}
-
 		// Maybe panic here.
-		return false
+		return
 	}
 
 	if s.isMultiplex() {
@@ -3046,8 +3019,6 @@ func (t *Topic) addSession(sess *Session, asUid types.Uid) bool {
 	} else {
 		t.sessions[s] = perSessionData{uid: asUid}
 	}
-
-	return true
 }
 
 // Disconnects session from topic if either one of the following is true:
