@@ -260,7 +260,11 @@ func (s *Session) queueOut(msg *ServerComMessage) bool {
 	}
 
 	data := s.serialize(msg)
-	statsAddHistSample("OutgoingMessageSize", float64(len(data.([]byte))))
+	// NOTE: not sampling grpc message
+	if raw, ok := data.([]byte); ok {
+		statsAddHistSample("OutgoingMessageSize", float64(len(raw)))
+	}
+
 	select {
 	case s.send <- data:
 	case <-time.After(sendTimeout):
