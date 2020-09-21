@@ -101,6 +101,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	* Sender user data
 	 */
 	sender, _ := store.Users.Get(t.ParseUserId(msg.Payload.From))
+	topic, _ := store.Topics.Get(msg.Payload.Topic)
 
 	/*
 	* Recipients list with user data, and conversation status
@@ -123,6 +124,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	data := make(map[string]interface{})
 	data["recipients"] = recipients
 	data["sender"] = sender
+	data["topic"] = topic
 	data["payload"] = messagePayload(&msg.Payload)
 	data["head"] = msg.Payload.Head
 	requestData, _ := json.Marshal(data)
