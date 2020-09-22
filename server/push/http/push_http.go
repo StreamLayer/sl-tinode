@@ -101,7 +101,9 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	* Sender user data
 	 */
 	sender, _ := store.Users.Get(t.ParseUserId(msg.Payload.From))
+	log.Print("notification topic id: ", msg.Payload.Topic)
 	topic, _ := store.Topics.Get(msg.Payload.Topic)
+	log.Print("notification topic: ", topic)
 
 	/*
 	* Recipients list with user data, and conversation status
