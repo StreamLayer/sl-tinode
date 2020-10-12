@@ -267,6 +267,8 @@ func decodeStoreErrorExplicitTs(err error, id, topic string, serverTs, incomingR
 			errmsg = ErrNotFound(id, topic, serverTs, incomingReqTs)
 		case types.ErrInvalidResponse:
 			errmsg = ErrInvalidResponse(id, topic, serverTs, incomingReqTs)
+		case types.ErrRedirected:
+			errmsg = InfoUseOther(id, topic, params["topic"].(string), serverTs, incomingReqTs)
 		default:
 			errmsg = ErrUnknownExplicitTs(id, topic, serverTs, incomingReqTs)
 		}
@@ -296,7 +298,7 @@ func selectAccessMode(authLvl auth.Level, anonMode, authMode, rootMode types.Acc
 }
 
 // Get default modeWant for the given topic category
-func getDefaultAccess(cat types.TopicCat, authUser bool) types.AccessMode {
+func getDefaultAccess(cat types.TopicCat, authUser, isChan bool) types.AccessMode {
 	if !authUser {
 		return types.ModeNone
 	}
@@ -307,6 +309,9 @@ func getDefaultAccess(cat types.TopicCat, authUser bool) types.AccessMode {
 	case types.TopicCatFnd:
 		return types.ModeNone
 	case types.TopicCatGrp:
+		if isChan {
+			return types.ModeCChnWriter
+		}
 		return types.ModeCPublic
 	case types.TopicCatMe:
 		return types.ModeCSelf

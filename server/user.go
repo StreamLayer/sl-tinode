@@ -85,8 +85,10 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	}
 
 	// Assign default access values in case the acc creator has not provided them
-	user.Access.Auth = getDefaultAccess(types.TopicCatP2P, true) | getDefaultAccess(types.TopicCatGrp, true)
-	user.Access.Anon = getDefaultAccess(types.TopicCatP2P, false) | getDefaultAccess(types.TopicCatGrp, false)
+	user.Access.Auth = getDefaultAccess(types.TopicCatP2P, true, false) |
+		getDefaultAccess(types.TopicCatGrp, true, false)
+	user.Access.Anon = getDefaultAccess(types.TopicCatP2P, false, false) |
+		getDefaultAccess(types.TopicCatGrp, false, false)
 
 	// Assign actual access values, public and private.
 	if msg.Acc.Desc != nil {
@@ -630,7 +632,8 @@ func replyDelUser(s *Session, msg *ClientComMessage) {
 	if s.uid == uid && s.multi == nil {
 		// Evict the current session if it belongs to the deleted user.
 		// No need to send it to multiplexing session: remote node will be notified separately.
-		s.stop <- s.serialize(NoErrEvicted("", "", msg.Timestamp))
+		_, data := s.serialize(NoErrEvicted("", "", msg.Timestamp))
+		s.stopSession(data)
 	}
 }
 
@@ -721,10 +724,12 @@ func usersPush(rcpt *push.Receipt) {
 	if globals.cluster != nil {
 		local = &UserCacheReq{PushRcpt: &push.Receipt{
 			Payload: rcpt.Payload,
+			Channel: rcpt.Channel,
 			To:      make(map[types.Uid]push.Recipient),
 		}}
 		remote := &UserCacheReq{PushRcpt: &push.Receipt{
 			Payload: rcpt.Payload,
+			Channel: rcpt.Channel,
 			To:      make(map[types.Uid]push.Recipient),
 		}}
 
@@ -736,14 +741,14 @@ func usersPush(rcpt *push.Receipt) {
 			}
 		}
 
-		if len(remote.PushRcpt.To) > 0 {
+		if len(remote.PushRcpt.To) > 0 || remote.PushRcpt.Channel != "" {
 			globals.cluster.routeUserReq(remote)
 		}
 	} else {
 		local = &UserCacheReq{PushRcpt: rcpt}
 	}
 
-	if len(local.PushRcpt.To) > 0 {
+	if len(local.PushRcpt.To) > 0 || local.PushRcpt.Channel != "" {
 		select {
 		case globals.usersUpdate <- local:
 		default:
@@ -894,7 +899,6 @@ func userUpdater() {
 					upd.PushRcpt.To[uid] = rcptTo
 				}
 			}
-
 			push.Push(upd.PushRcpt)
 			continue
 		}

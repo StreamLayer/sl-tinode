@@ -19,6 +19,14 @@ import (
 
 // topicInit reads an existing topic from database or creates a new topic
 func topicInit(t *Topic, join *sessionJoin, h *Hub) {
+	var subscribeReqIssued bool
+	defer func() {
+		if !subscribeReqIssued && join.pkt.Sub != nil && join.sess.inflightReqs != nil {
+			// If it was a client initiated subscribe request and we failed it.
+			join.sess.inflightReqs.Done()
+		}
+	}()
+
 	timestamp := types.TimeNow()
 
 	var err error
@@ -33,10 +41,13 @@ func topicInit(t *Topic, join *sessionJoin, h *Hub) {
 		// Request to load an existing or create a new p2p topic, then attach to it.
 		err = initTopicP2P(t, join)
 	case strings.HasPrefix(t.xoriginal, "new"):
-		// Processing request to create a new group topic
-		err = initTopicNewGrp(t, join)
-	case strings.HasPrefix(t.xoriginal, "grp"):
-		// Load existing group topic
+		// Processing request to create a new group topic.
+		err = initTopicNewGrp(t, join, false)
+	case strings.HasPrefix(t.xoriginal, "nch"):
+		// Processing request to create a new channel.
+		err = initTopicNewGrp(t, join, true)
+	case strings.HasPrefix(t.xoriginal, "grp") || strings.HasPrefix(t.xoriginal, "chn"):
+		// Load existing group topic (or channel).
 		err = initTopicGrp(t, join)
 	case t.xoriginal == "sys":
 		// Initialize system topic.
@@ -106,6 +117,7 @@ func topicInit(t *Topic, join *sessionJoin, h *Hub) {
 
 	// Topic will check access rights, send invite to p2p user, send {ctrl} message to the initiator session
 	if join.pkt.Sub != nil {
+		subscribeReqIssued = true
 		t.reg <- join
 	}
 
@@ -186,8 +198,8 @@ func initTopicFnd(t *Topic, sreg *sessionJoin) error {
 	}
 
 	// Make sure no one can join the topic.
-	t.accessAuth = getDefaultAccess(t.cat, true)
-	t.accessAnon = getDefaultAccess(t.cat, false)
+	t.accessAuth = getDefaultAccess(t.cat, true, false)
+	t.accessAnon = getDefaultAccess(t.cat, false, false)
 
 	if err = t.loadSubscribers(); err != nil {
 		return err
@@ -474,17 +486,18 @@ func initTopicP2P(t *Topic, sreg *sessionJoin) error {
 }
 
 // Create a new group topic
-func initTopicNewGrp(t *Topic, sreg *sessionJoin) error {
+func initTopicNewGrp(t *Topic, sreg *sessionJoin, isChan bool) error {
 	timestamp := types.TimeNow()
 	pktsub := sreg.pkt.Sub
 
 	t.cat = types.TopicCatGrp
+	t.isChan = isChan
 
 	// Generic topics have parameters stored in the topic object
 	t.owner = types.ParseUserId(sreg.pkt.AsUser)
 
-	t.accessAuth = getDefaultAccess(t.cat, true)
-	t.accessAnon = getDefaultAccess(t.cat, false)
+	t.accessAuth = getDefaultAccess(t.cat, true, isChan)
+	t.accessAnon = getDefaultAccess(t.cat, false, isChan)
 
 	// Owner/creator gets full access to the topic. Owner may change the default modeWant through 'set'.
 	userData := perUserData{
@@ -559,6 +572,7 @@ func initTopicNewGrp(t *Topic, sreg *sessionJoin) error {
 		ObjHeader: types.ObjHeader{Id: sreg.pkt.RcptTo, CreatedAt: timestamp},
 		Access:    types.DefaultAccess{Auth: t.accessAuth, Anon: t.accessAnon},
 		Tags:      tags,
+		UseBt:     isChan,
 		Public:    t.public}
 
 	// store.Topics.Create will add a subscription record for the topic creator
@@ -568,15 +582,15 @@ func initTopicNewGrp(t *Topic, sreg *sessionJoin) error {
 		return err
 	}
 
-	t.xoriginal = t.name // keeping 'new' as original has no value to the client
+	t.xoriginal = t.name // keeping 'new' or 'nch' as original has no value to the client
 	pktsub.Created = true
 	pktsub.Newsub = true
 
 	return nil
 }
 
-// Initialize existing group topic. There is a race condition
-// when two users attempt to load the same topic at the same time.
+// Initialize existing group topic. There is a race condition when two users attempt to load
+// the same topic at the same time. It's prevented at hub level.
 func initTopicGrp(t *Topic, sreg *sessionJoin) error {
 	t.cat = types.TopicCatGrp
 
@@ -591,6 +605,8 @@ func initTopicGrp(t *Topic, sreg *sessionJoin) error {
 	if err = t.loadSubscribers(); err != nil {
 		return err
 	}
+
+	t.isChan = stopic.UseBt
 
 	// t.owner is set by loadSubscriptions
 
@@ -612,6 +628,8 @@ func initTopicGrp(t *Topic, sreg *sessionJoin) error {
 
 	// Initialize channel for receiving session online updates.
 	t.supd = make(chan *sessionUpdate, 32)
+
+	t.xoriginal = t.name // topic may have been loaded by a channel reader; make sure it's grpXXX, not chnXXX.
 
 	return nil
 }

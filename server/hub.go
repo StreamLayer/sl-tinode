@@ -22,9 +22,12 @@ import (
 
 // Request latency distribution bounds (in milliseconds).
 // "var" because Go does not support array constants.
-var RequestLatencyDistribution = []float64{1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 25, 30, 40, 50, 65, 80, 100, 130, 160, 200, 250, 300, 400, 500, 650, 800, 1000, 2000, 5000, 10000, 20000, 50000, 100000}
+var RequestLatencyDistribution = []float64{1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 25, 30, 40, 50, 65, 80, 100, 130,
+	160, 200, 250, 300, 400, 500, 650, 800, 1000, 2000, 5000, 10000, 20000, 50000, 100000}
+
 // Outgoing message size distribution bounds (in bytes).
-var OutgoingMessageSizeDistribution = []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864, 268435456, 1073741824, 4294967296}
+var OutgoingMessageSizeDistribution = []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 16384,
+	65536, 262144, 1048576, 4194304, 16777216, 67108864, 268435456, 1073741824, 4294967296}
 
 // Request to hub to subscribe session to topic
 type sessionJoin struct {
@@ -78,10 +81,10 @@ type Hub struct {
 	// Channel for routing messages between topics, buffered at 4096
 	route chan *ServerComMessage
 
-	// subscribe session to topic, possibly creating a new topic, unbuffered
+	// subscribe session to topic, possibly creating a new topic, buffered at 32
 	join chan *sessionJoin
 
-	// Remove topic from hub, possibly deleting it afterwards, unbuffered
+	// Remove topic from hub, possibly deleting it afterwards, buffered at 32
 	unreg chan *topicUnreg
 
 	// Process get.info requests for topic not subscribed to, buffered 128
@@ -114,8 +117,8 @@ func newHub() *Hub {
 		topics: &sync.Map{},
 		// this needs to be buffered - hub generates invites and adds them to this queue
 		route:    make(chan *ServerComMessage, 4096),
-		join:     make(chan *sessionJoin),
-		unreg:    make(chan *topicUnreg),
+		join:     make(chan *sessionJoin, 256),
+		unreg:    make(chan *topicUnreg, 256),
 		rehash:   make(chan bool),
 		meta:     make(chan *metaReq, 128),
 		shutdown: make(chan chan<- bool),
@@ -135,6 +138,11 @@ func newHub() *Hub {
 
 	statsRegisterInt("FileDownloadsTotal")
 	statsRegisterInt("FileUploadsTotal")
+
+	statsRegisterInt("CtrlCodesTotal2xx")
+	statsRegisterInt("CtrlCodesTotal3xx")
+	statsRegisterInt("CtrlCodesTotal4xx")
+	statsRegisterInt("CtrlCodesTotal5xx")
 
 	statsRegisterHistogram("RequestLatency", RequestLatencyDistribution)
 	statsRegisterHistogram("OutgoingMessageSize", OutgoingMessageSizeDistribution)
@@ -163,7 +171,6 @@ func (h *Hub) run() {
 			// 1.2.3 if it cannot be loaded (not found), fail
 			// 2. Check access rights and reject, if appropriate
 			// 3. Attach session to the topic
-
 			// Is the topic already loaded?
 			t := h.topicGet(join.pkt.RcptTo)
 			if t == nil {
@@ -174,9 +181,9 @@ func (h *Hub) run() {
 					isProxy:   globals.cluster.isRemoteTopic(join.pkt.RcptTo),
 					sessions:  make(map[*Session]perSessionData),
 					broadcast: make(chan *ServerComMessage, 256),
-					reg:       make(chan *sessionJoin, 32),
-					unreg:     make(chan *sessionLeave, 32),
-					meta:      make(chan *metaReq, 32),
+					reg:       make(chan *sessionJoin, 256),
+					unreg:     make(chan *sessionLeave, 256),
+					meta:      make(chan *metaReq, 64),
 					perUser:   make(map[types.Uid]perUserData),
 					exit:      make(chan *shutDown, 1),
 				}
@@ -201,7 +208,13 @@ func (h *Hub) run() {
 			} else {
 				// Topic found.
 				// Topic will check access rights and send appropriate {ctrl}
-				t.reg <- join
+				select {
+				case t.reg <- join:
+				default:
+					join.sess.inflightReqs.Done()
+					join.sess.queueOut(ErrServiceUnavailableReply(join.pkt, join.pkt.Timestamp))
+					log.Println("hub.join loop: topic's reg queue full", join.pkt.RcptTo, join.sess.sid, " - total queue len:", len(t.reg))
+				}
 			}
 
 		case msg := <-h.route:

@@ -1,6 +1,6 @@
 # Tinode Instant Messaging Server
 
-<img src="docs/logo.svg" align="left" width=128 height=128> Instant messaging server. Backend in pure [Go](http://golang.org) (license [GPL 3.0](http://www.gnu.org/licenses/gpl-3.0.en.html)), client-side binding in Java, Javascript, and Swift, as well as [gRPC](https://grpc.io/) client support for C++, C#, Go, Java, Node, PHP, Python, Ruby, Objective-C, etc. (license [Apache 2.0](http://www.apache.org/licenses/LICENSE-2.0)). Wire transport is JSON over websocket (long polling is also available) for custom bindings, or [protobuf](https://developers.google.com/protocol-buffers/) with gRPC. Persistent storage [RethinkDB](http://rethinkdb.com/), MySQL and MongoDB (experimental). A third-party unsupported [DynamoDB adapter](https://github.com/riandyrn/chat/tree/master/server/db/dynamodb) also exists. Other databases can be supported by writing custom adapters.
+<img src="docs/logo.svg" align="left" width=128 height=128> Instant messaging server. Backend in pure [Go](http://golang.org) (license [GPL 3.0](http://www.gnu.org/licenses/gpl-3.0.en.html)), client-side binding in Java, Javascript, and Swift, as well as [gRPC](https://grpc.io/) client support for C++, C#, Go, Java, Node, PHP, Python, Ruby, Objective-C, etc. (license [Apache 2.0](http://www.apache.org/licenses/LICENSE-2.0)). Wire transport is JSON over websocket (long polling is also available) for custom bindings, or [protobuf](https://developers.google.com/protocol-buffers/) with gRPC. Persistent storage is any one of [RethinkDB](http://rethinkdb.com/), MySQL or MongoDB. A third-party unsupported [DynamoDB adapter](https://github.com/riandyrn/chat/tree/master/server/db/dynamodb) also exists. Other databases can be supported by writing custom adapters.
 
 Tinode is *not* XMPP/Jabber. It is *not* compatible with XMPP. It's meant as a replacement for XMPP. On the surface, it's a lot like open source WhatsApp or Telegram.
 
@@ -71,29 +71,26 @@ When you register a new account you are asked for an email address to send valid
   * [iOS](https://github.com/tinode/ios)
   * [Web](https://github.com/tinode/webapp/)
   * Scriptable [command line](tn-cli/)
-* One-on-one messaging.
-* Group messaging with every member's access permissions managed individually. The maximum number of members is configurable (128 by default).
+* One-on-one and group messaging.
+* Channels with an unlimited number of read-only subscribers.
 * Sharded clustering with failover.
-* Flexible access control with permissions for various actions.
-* Server-generated presence notifications for people, group conversations.
+* Granular access control with permissions for various actions.
+* Server-generated presence notifications for people, group chats.
 * Support for custom authentication backends.
 * Bindings for various programming languages:
   * Javascript with no external dependencies.
   * Java with dependencies on [Jackson](https://github.com/FasterXML/jackson) and [Java-Websocket](https://github.com/TooTallNate/Java-WebSocket). Suitable for Android but with no Android SDK dependencies.
   * Swift with dependency on [SwiftWebSocket](https://github.com/tidwall/SwiftWebSocket).
-  * C/C++, C#, Python, PHP, Ruby and other languages using [gRPC](https://grpc.io/docs/languages/).
+  * C/C++, C#, Go, Python, PHP, Ruby and many other languages using [gRPC](https://grpc.io/docs/languages/).
 * Websocket, long polling, and [gRPC](https://grpc.io/) over TCP or Unix sockets.
 * JSON or [protobuf version 3](https://developers.google.com/protocol-buffers/) wire protocols.
-* Optional built-in [TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security) with [Letsencrypt](https://letsencrypt.org/) or conventional certificates.
 * User search/discovery.
-* Rich formatting of messages, markdown-style: \*style\* &rarr; **style**.
-* Inline images and file attachments.
+* Rich formatting of messages markdown-style: \*style\* &rarr; **style**.
+* Inline images, file attachments.
 * Forms and templated responses suitable for chatbots.
 * Message status notifications: message delivery to server; received and read notifications; typing notifications.
-* Support for client-side data caching.
 * Ability to block unwanted communication server-side.
 * Anonymous users (important for use cases related to tech support over chat).
-* Push notifications using [FCM](https://firebase.google.com/docs/cloud-messaging/) or [TNPG](server/push/tnpg/).
 * Storage and out of band transfer of large objects like video files using local file system or Amazon S3.
 * Plugins to extend functionality, for example, to enable chatbots.
 
@@ -101,7 +98,9 @@ When you register a new account you are asked for an email address to send valid
 
 * [Federation](https://en.wikipedia.org/wiki/Federation_(information_technology)).
 * End to end encryption with [OTR](https://en.wikipedia.org/wiki/Off-the-Record_Messaging) for one-on-one messaging and undecided method for group messaging.
-* Channels with an unlimited number (or hundreds of thousands) of members with bearer token access control.
+* Replying and forwarding messages.
+* Voice and video messages, location sharing.
+* Previews of attached videos, documents, links.
 * Hot standby.
 * Different levels of message persistence (from strict persistence to "store until delivered" to purely ephemeral messaging).
 

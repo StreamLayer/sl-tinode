@@ -24,7 +24,7 @@ type MsgGetOpts struct {
 	User string `json:"user,omitempty"`
 	// Optional topic name to return result(s) for one topic.
 	Topic string `json:"topic,omitempty"`
-	// Return results modified dince this timespamp.
+	// Return results modified since this timespamp.
 	IfModifiedSince *time.Time `json:"ims,omitempty"`
 	// Load messages/ranges with IDs equal or greater than this (inclusive or closed)
 	SinceId int `json:"since,omitempty"`
@@ -599,7 +599,7 @@ type MsgServerPres struct {
 	// Flag to break the reply loop
 	WantReply bool `json:"-"`
 
-	// Additional access mode filters when senting to topic's online members. Both filter conditions must be true.
+	// Additional access mode filters when sending to topic's online members. Both filter conditions must be true.
 	// send only to those who have this access mode.
 	FilterIn int `json:"-"`
 	// skip those who have this access mode.
@@ -917,6 +917,17 @@ func NoErrShutdown(ts time.Time) *ServerComMessage {
 		Timestamp: ts}}
 }
 
+// NoErrDelivered means requested content has been delivered (208).
+func NoErrDeliveredParams(id, topic string, ts time.Time, params interface{}) *ServerComMessage {
+	return &ServerComMessage{Ctrl: &MsgServerCtrl{
+		Id:        id,
+		Code:      http.StatusAlreadyReported, // 208
+		Text:      "delivered",
+		Topic:     topic,
+		Params:    params,
+		Timestamp: ts}, Id: id}
+}
+
 // 3xx
 
 // InfoValidateCredentials requires user to confirm credentials before going forward (300).
@@ -951,6 +962,22 @@ func InfoAuthReset(id string, ts time.Time) *ServerComMessage {
 		Code:      http.StatusMovedPermanently, // 301
 		Text:      "auth reset",
 		Timestamp: ts}, Id: id, Timestamp: ts}
+}
+
+// InfoUseOther is a response to a subscription request redirecting client to another topic (303).
+func InfoUseOther(id, topic, other string, serverTs, incomingReqTs time.Time) *ServerComMessage {
+	return &ServerComMessage{Ctrl: &MsgServerCtrl{
+		Id:        id,
+		Code:      http.StatusSeeOther, // 303
+		Text:      "use other",
+		Topic:     topic,
+		Params:    map[string]string{"topic": other},
+		Timestamp: serverTs}, Id: id, Timestamp: incomingReqTs}
+}
+
+// InfoUseOtherReply is a response to a subscription request redirecting client to another topic (303).
+func InfoUseOtherReply(msg *ClientComMessage, other string, ts time.Time) *ServerComMessage {
+	return InfoUseOther(msg.Id, msg.Original, other, ts, msg.Timestamp)
 }
 
 // InfoAlreadySubscribed response means request to subscribe was ignored because user is already subscribed (304).
@@ -995,7 +1022,7 @@ func InfoNotModified(id, topic string, ts time.Time) *ServerComMessage {
 	return InfoNotModifiedExplicitTs(id, topic, ts, ts)
 }
 
-// InfoNotModifiedReply response means update request was a noop 
+// InfoNotModifiedReply response means update request was a noop
 // in response to a client request (304).
 func InfoNotModifiedReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
 	return InfoNotModifiedExplicitTs(msg.Id, msg.Original, ts, msg.Timestamp)
@@ -1299,22 +1326,6 @@ func ErrPolicyReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
 	return ErrPolicyExplicitTs(msg.Id, msg.Original, ts, msg.Timestamp)
 }
 
-// ErrLocked operation rejected because the topic is being deleted (423).
-func ErrLocked(id, topic string, ts time.Time) *ServerComMessage {
-	return ErrLockedExplicitTs(id, topic, ts, ts)
-}
-
-// ErrLocked operation rejected because the topic is being deleted
-// with explicit server and incoming request timestamps (423).
-func ErrLockedExplicitTs(id, topic string, serverTs, incomingReqTs time.Time) *ServerComMessage {
-	return &ServerComMessage{Ctrl: &MsgServerCtrl{
-		Id:        id,
-		Code:      http.StatusLocked, // 423
-		Text:      "locked",
-		Topic:     topic,
-		Timestamp: serverTs}, Id: id, Timestamp: incomingReqTs}
-}
-
 // ErrLockedReply operation rejected because the topic is being deleted
 // with explicit server and incoming request timestamps in response to a client request (423).
 func ErrLockedReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
@@ -1326,8 +1337,7 @@ func ErrUnknown(id, topic string, ts time.Time) *ServerComMessage {
 	return ErrUnknownExplicitTs(id, topic, ts, ts)
 }
 
-// ErrUnknown database or other server error
-// with explicit server and incoming request timestamps (500).
+// ErrUnknown database or other server error with explicit server and incoming request timestamps (500).
 func ErrUnknownExplicitTs(id, topic string, serverTs, incomingReqTs time.Time) *ServerComMessage {
 	return &ServerComMessage{Ctrl: &MsgServerCtrl{
 		Id:        id,
@@ -1342,8 +1352,8 @@ func ErrUnknownReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
 	return ErrUnknownExplicitTs(msg.Id, msg.Original, ts, msg.Timestamp)
 }
 
-// ErrNotImplemented feature not implemented
-// with explicit server and incoming request timestamps (501).
+// ErrNotImplemented feature not implemented with explicit server and incoming request timestamps (501).
+// TODO: consider changing status code to 4XX.
 func ErrNotImplemented(id, topic string, serverTs, incomingReqTs time.Time) *ServerComMessage {
 	return &ServerComMessage{Ctrl: &MsgServerCtrl{
 		Id:        id,
@@ -1361,6 +1371,43 @@ func ErrClusterUnreachable(id, topic string, ts time.Time) *ServerComMessage {
 		Text:      "cluster unreachable",
 		Topic:     topic,
 		Timestamp: ts}, Id: id, Timestamp: ts}
+}
+
+// ErrServiceUnavailableReply server error in response to a client request (503).
+func ErrServiceUnavailableReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
+	return ErrServiceUnavailableExplicitTs(msg.Id, msg.Original, ts, msg.Timestamp)
+}
+
+// ErrServiceUnavailableExplicitTs server error (503).
+func ErrServiceUnavailableExplicitTs(id, topic string, serverTs, incomingReqTs time.Time) *ServerComMessage {
+	return &ServerComMessage{Ctrl: &MsgServerCtrl{
+		Id:        id,
+		Code:      http.StatusServiceUnavailable, // 503
+		Text:      "service unavailable",
+		Topic:     topic,
+		Timestamp: serverTs}, Id: id, Timestamp: incomingReqTs}
+}
+
+// ErrLocked operation rejected because the topic is being deleted (503).
+func ErrLocked(id, topic string, ts time.Time) *ServerComMessage {
+	return ErrLockedExplicitTs(id, topic, ts, ts)
+}
+
+// ErrLockedReply operation rejected because the topic is being deleted with explicit server and
+// incoming request timestamps in response to a client request (503).
+func ErrLockedReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
+	return ErrLockedExplicitTs(msg.Id, msg.Original, ts, msg.Timestamp)
+}
+
+// ErrLocked operation rejected because the topic is being deleted
+// with explicit server and incoming request timestamps (503).
+func ErrLockedExplicitTs(id, topic string, serverTs, incomingReqTs time.Time) *ServerComMessage {
+	return &ServerComMessage{Ctrl: &MsgServerCtrl{
+		Id:        id,
+		Code:      http.StatusServiceUnavailable, // 503
+		Text:      "locked",
+		Topic:     topic,
+		Timestamp: serverTs}, Id: id, Timestamp: incomingReqTs}
 }
 
 // ErrVersionNotSupported invalid (too low) protocol version (505).

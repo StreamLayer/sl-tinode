@@ -76,6 +76,8 @@ func (ss *SessionStore) NewSession(conn interface{}, sid string) (*Session, int)
 	s.bkgTimer = time.NewTimer(time.Hour)
 	s.bkgTimer.Stop()
 
+	s.inflightReqs = &sync.WaitGroup{}
+
 	s.lastTouched = time.Now()
 
 	ss.lock.Lock()
@@ -156,7 +158,8 @@ func (ss *SessionStore) Shutdown() {
 	shutdown := NoErrShutdown(types.TimeNow())
 	for _, s := range ss.sessCache {
 		if !s.isMultiplex() {
-			s.stop <- s.serialize(shutdown)
+			_, data := s.serialize(shutdown)
+			s.stopSession(data)
 		}
 	}
 
@@ -175,7 +178,8 @@ func (ss *SessionStore) EvictUser(uid types.Uid, skipSid string) {
 	evicted.AsUser = uid.UserId()
 	for _, s := range ss.sessCache {
 		if s.uid == uid && !s.isMultiplex() && s.sid != skipSid {
-			s.stop <- s.serialize(evicted)
+			_, data := s.serialize(evicted)
+			s.stopSession(data)
 			delete(ss.sessCache, s.sid)
 			if s.proto == LPOLL {
 				ss.lru.Remove(s.lpTracker)
@@ -198,7 +202,7 @@ func (ss *SessionStore) NodeRestarted(nodeName string, fingerprint int64) {
 			continue
 		}
 		if s.clnode.fingerprint != fingerprint {
-			s.stop <- nil
+			s.stopSession(nil)
 			delete(ss.sessCache, s.sid)
 		}
 	}
