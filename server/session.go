@@ -12,6 +12,7 @@ package main
 import (
 	"container/list"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -119,6 +120,16 @@ type Session struct {
 	background bool
 	// Timer which triggers after some seconds to mark background session as foreground.
 	bkgTimer *time.Timer
+
+	// Number of subscribe/unsubscribe requests in flight.
+	inflightReqs *sync.WaitGroup
+	// Synchronizes access to session store in cluster mode:
+	// subscribe/unsubscribe replies are asynchronous.
+	sessionStoreLock sync.Mutex
+	// Indicates that the session is terminating.
+	// After this flag's been flipped to true, there must not be any more writes
+	// into the session's send channel.
+	terminating bool
 
 	// Outbound mesages, buffered.
 	// The content must be serialized in format suitable for the session.
@@ -247,6 +258,9 @@ func (s *Session) isCluster() bool {
 // queueOut attempts to send a ServerComMessage to a session write loop; if the send buffer is full,
 // timeout is `sendTimeout`.
 func (s *Session) queueOut(msg *ServerComMessage) bool {
+	if s.terminating {
+		return true
+	}
 	if s.multi != nil {
 		// In case of a cluster we need to pass a copy of the actual session.
 		msg.sess = s
@@ -254,21 +268,27 @@ func (s *Session) queueOut(msg *ServerComMessage) bool {
 	}
 
 	// Record latency only on {ctrl} messages and end-user sessions.
-	if msg.Ctrl != nil && msg.Id != "" && !msg.Ctrl.Timestamp.IsZero() && !s.isCluster() {
-		duration := time.Since(msg.Ctrl.Timestamp).Milliseconds()
-		statsAddHistSample("RequestLatency", float64(duration))
+	if msg.Ctrl != nil && msg.Id != "" {
+		if !msg.Ctrl.Timestamp.IsZero() && !s.isCluster() {
+			duration := time.Since(msg.Ctrl.Timestamp).Milliseconds()
+			statsAddHistSample("RequestLatency", float64(duration))
+		}
+		if 200 <= msg.Ctrl.Code && msg.Ctrl.Code < 600 {
+			statsInc(fmt.Sprintf("CtrlCodesTotal%dxx", msg.Ctrl.Code/100), 1)
+		} else {
+			log.Println("Invalid response code: ", msg.Ctrl.Code)
+		}
 	}
 
-	data := s.serialize(msg)
-	// NOTE: not sampling grpc message
-	if raw, ok := data.([]byte); ok {
-		statsAddHistSample("OutgoingMessageSize", float64(len(raw)))
+	dataSize, data := s.serialize(msg)
+	if dataSize >= 0 {
+		statsAddHistSample("OutgoingMessageSize", float64(dataSize))
 	}
-
 	select {
 	case s.send <- data:
-	case <-time.After(sendTimeout):
-		log.Println("s.queueOut: timeout", s.sid)
+	default:
+		// Never block here since it may also block the topic's run() goroutine.
+		log.Println("s.queueOut: session's send queue full", s.sid)
 		return false
 	}
 	return true
@@ -277,33 +297,69 @@ func (s *Session) queueOut(msg *ServerComMessage) bool {
 // queueOutBytes attempts to send a ServerComMessage already serialized to []byte.
 // If the send buffer is full, timeout is `sendTimeout`.
 func (s *Session) queueOutBytes(data []byte) bool {
-	if s == nil {
+	if s == nil || s.terminating {
 		return true
 	}
 
 	select {
 	case s.send <- data:
-	case <-time.After(sendTimeout):
-		log.Println("s.queueOutBytes: timeout", s.sid)
+	default:
+		log.Println("s.queueOutBytes: session's send queue full", s.sid)
 		return false
 	}
 	return true
 }
 
+func (s *Session) detachSession(fromTopic string) {
+	if !s.terminating {
+		s.detach <- fromTopic
+	}
+}
+
+func (s *Session) stopSession(data interface{}) {
+	s.stop <- data
+}
+
+func (sess *Session) purgeChannels() {
+	for len(sess.send) > 0 {
+		<-sess.send
+	}
+	for len(sess.stop) > 0 {
+		<-sess.stop
+	}
+	for len(sess.detach) > 0 {
+		<-sess.detach
+	}
+}
+
 // cleanUp is called when the session is terminated to perform resource cleanup.
 func (s *Session) cleanUp(expired bool) {
+	s.terminating = true
+	s.purgeChannels()
+	s.inflightReqs.Wait()
 	if !expired {
+		s.sessionStoreLock.Lock()
 		globals.sessionStore.Delete(s)
+		s.sessionStoreLock.Unlock()
 	}
 
 	s.background = false
 	s.bkgTimer.Stop()
 	s.unsubAll()
+	// Stop the write loop.
+	s.stopSession(nil)
 }
 
 // Message received, convert bytes to ClientComMessage and dispatch
 func (s *Session) dispatchRaw(raw []byte) {
+	now := types.TimeNow()
 	var msg ClientComMessage
+
+	if s.terminating {
+		log.Println("s.dispatch: message received on a terminating session", s.sid)
+		s.queueOut(ErrLocked("", "", now))
+		return
+	}
 
 	if len(raw) == 1 && raw[0] == 0x31 {
 		// 0x31 == '1'. This is a network probe message. Respond with a '0':
@@ -322,7 +378,6 @@ func (s *Session) dispatchRaw(raw []byte) {
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		// Malformed message
 		log.Println("s.dispatch", err, s.sid)
-		now := time.Now().UTC().Round(time.Millisecond)
 		s.queueOut(ErrMalformed("", "", now))
 		return
 	}
@@ -462,10 +517,10 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 	}
 }
 
-// Request to subscribe to a topic
+// Request to subscribe to a topic.
 func (s *Session) subscribe(msg *ClientComMessage) {
-	if strings.HasPrefix(msg.Original, "new") {
-		// Request to create a new named topic.
+	if strings.HasPrefix(msg.Original, "new") || strings.HasPrefix(msg.Original, "nch") {
+		// Request to create a new group/channel topic.
 		// If we are in a cluster, make sure the new topic belongs to the current node.
 		msg.RcptTo = globals.cluster.genLocalTopicName()
 	} else {
@@ -481,9 +536,17 @@ func (s *Session) subscribe(msg *ClientComMessage) {
 	if sub := s.getSub(msg.RcptTo); sub != nil {
 		s.queueOut(InfoAlreadySubscribed(msg.Id, msg.Original, msg.Timestamp))
 	} else {
-		globals.hub.join <- &sessionJoin{
+		s.inflightReqs.Add(1)
+		select {
+		case globals.hub.join <- &sessionJoin{
 			pkt:  msg,
-			sess: s}
+			sess: s}:
+		default:
+			// Reply with a 500 to the user.
+			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
+			s.inflightReqs.Done()
+			log.Println("s.subscribe: join queue full, topic ", msg.RcptTo, s.sid)
+		}
 		// Hub will send Ctrl success/failure packets back to session
 	}
 }
@@ -506,6 +569,7 @@ func (s *Session) leave(msg *ClientComMessage) {
 		} else {
 			// Unlink from topic, topic will send a reply.
 			s.delSub(msg.RcptTo)
+			s.inflightReqs.Add(1)
 			sub.done <- &sessionLeave{
 				pkt:  msg,
 				sess: s}
@@ -746,7 +810,12 @@ func (s *Session) login(msg *ClientComMessage) {
 
 	rec, challenge, err := handler.Authenticate(msg.Login.Secret)
 	if err != nil {
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		resp := decodeStoreError(err, msg.Id, "", msg.Timestamp, nil)
+		if resp.Ctrl.Code >= 500 {
+			// Log internal errors
+			log.Println("s.login: internal", err, s.sid)
+		}
+		s.queueOut(resp)
 		return
 	}
 
@@ -1073,15 +1142,17 @@ func (s *Session) expandTopicName(msg *ClientComMessage) (string, *ServerComMess
 		uid1 := types.ParseUserId(msg.AsUser)
 		uid2 := types.ParseUserId(msg.Original)
 		if uid2.IsZero() {
-			// Ensure the user id is valid
+			// Ensure the user id is valid.
 			log.Println("s.etn: failed to parse p2p topic name", s.sid)
 			return "", ErrMalformed(msg.Id, msg.Original, msg.Timestamp)
 		} else if uid2 == uid1 {
-			// Use 'me' to access self-topic
+			// Use 'me' to access self-topic.
 			log.Println("s.etn: invalid p2p self-subscription", s.sid)
 			return "", ErrPermissionDeniedReply(msg, msg.Timestamp)
 		}
 		routeTo = uid1.P2PName(uid2)
+	} else if tmp := types.ChnToGrp(msg.Original); tmp != "" {
+		routeTo = tmp
 	} else {
 		routeTo = msg.Original
 	}
@@ -1089,19 +1160,21 @@ func (s *Session) expandTopicName(msg *ClientComMessage) (string, *ServerComMess
 	return routeTo, nil
 }
 
-func (s *Session) serialize(msg *ServerComMessage) interface{} {
+func (s *Session) serialize(msg *ServerComMessage) (int, interface{}) {
 	if s.proto == GRPC {
-		return pbServSerialize(msg)
+		msg := pbServSerialize(msg)
+		// TODO: calculate and return the size of `msg`.
+		return -1, msg
 	}
 
 	if s.proto == MULTIPLEX {
 		// No need to serialize the message to bytes within the cluster,
 		// but we have to create a copy because the original msg can be mutated.
-		return msg.copy()
+		return -1, msg.copy()
 	}
 
 	out, _ := json.Marshal(msg)
-	return out
+	return len(out), out
 }
 
 // onBackgroundTimer marks background session as foreground and informs topics it's subscribed to.
