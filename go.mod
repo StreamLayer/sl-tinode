@@ -20,8 +20,7 @@ require (
 	golang.org/x/crypto v0.0.0-20200728195943-123391ffb6de
 	golang.org/x/net v0.0.0-20200707034311-ab3426394381
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
-	golang.org/x/sys v0.0.0-20200202164722-d101bd2416d5 // indirect
-	golang.org/x/text v0.3.2
+	golang.org/x/text v0.3.3
 	google.golang.org/api v0.20.0
 	google.golang.org/grpc v1.28.0
 	gopkg.in/rethinkdb/rethinkdb-go.v6 v6.2.1

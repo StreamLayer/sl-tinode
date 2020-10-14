@@ -26,6 +26,7 @@ const defaultBuffer = 32
 type httpPush struct {
 	initialized bool
 	input       chan *push.Receipt
+	channel     chan *push.ChannelReq // note: not implemented yet
 	stop        chan bool
 }
 
@@ -150,6 +151,11 @@ func (httpPush) IsReady() bool {
 // If the adapter blocks, the message will be dropped.
 func (httpPush) Push() chan<- *push.Receipt {
 	return handler.input
+}
+
+// Channel returns a channel for subscribing/unsubscribing devices to FCM topics.
+func (httpPush) Channel() chan<- *push.ChannelReq {
+	return handler.channel
 }
 
 // Stop terminates the handler's worker and stops sending pushes.
