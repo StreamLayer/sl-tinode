@@ -2843,7 +2843,6 @@ func (t *Topic) replyDelSub(h *Hub, sess *Session, asUid types.Uid, msg *ClientC
 // FIXME: if grp subscription does not exist, replyLeaveUnsub will replace grpXXX with chnXXX.
 func (t *Topic) replyLeaveUnsub(h *Hub, sess *Session, msg *ClientComMessage, asUid types.Uid) error {
 	now := types.TimeNow()
-	id := msg.Id
 
 	if asUid.IsZero() {
 		panic("replyLeaveUnsub: zero asUid")

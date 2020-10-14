@@ -1393,12 +1393,6 @@ func ErrLocked(id, topic string, ts time.Time) *ServerComMessage {
 	return ErrLockedExplicitTs(id, topic, ts, ts)
 }
 
-// ErrLockedReply operation rejected because the topic is being deleted with explicit server and
-// incoming request timestamps in response to a client request (503).
-func ErrLockedReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
-	return ErrLockedExplicitTs(msg.Id, msg.Original, ts, msg.Timestamp)
-}
-
 // ErrLocked operation rejected because the topic is being deleted
 // with explicit server and incoming request timestamps (503).
 func ErrLockedExplicitTs(id, topic string, serverTs, incomingReqTs time.Time) *ServerComMessage {
