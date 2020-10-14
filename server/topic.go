@@ -2604,8 +2604,6 @@ func (t *Topic) replyDelMsg(sess *Session, asUid types.Uid, msg *ClientComMessag
 		return errors.New("channel readers cannot delete messages")
 	}
 
-	del := msg.Del
-
 	pud := t.perUser[asUid]
 	if !(pud.modeGiven & pud.modeWant).IsDeleter() {
 		// User must have an R permission: if the user cannot read messages, he has
@@ -3394,7 +3392,7 @@ func (t *Topic) remProxiedSession(sess *Session) bool {
 }
 
 // Add session record. 'user' may be different from sess.uid.
-func (t *Topic) addSession(sess *Session, asUid types.Uid, isChanSub bool) {
+func (t *Topic) addSession(sess *Session, asUid types.Uid, isChanSub bool) bool {
 	s := sess
 	if sess.multi != nil {
 		s = s.multi
