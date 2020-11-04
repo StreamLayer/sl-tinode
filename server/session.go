@@ -461,6 +461,7 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 	case msg.Hi != nil:
 		handler = s.hello
 		msg.Id = msg.Hi.Id
+		uaRefresh = true
 
 	case msg.Login != nil:
 		handler = checkVers(msg, s.login)
@@ -710,9 +711,15 @@ func (s *Session) hello(msg *ClientComMessage) {
 		return
 	}
 
+	// refresh user-agent if subsequent {hi} message is sent to broadcast such changes
+	if msg.Hi.UserAgent != "" && s.userAgent != msg.Hi.UserAgent {
+		s.userAgent = msg.Hi.UserAgent
+	}
+
 	if msg.Hi.DeviceID == types.NullValue {
 		msg.Hi.DeviceID = ""
 	}
+
 	s.deviceID = msg.Hi.DeviceID
 	s.lang = msg.Hi.Lang
 	// Try to deduce the country from the locale.
