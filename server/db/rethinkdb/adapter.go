@@ -1074,6 +1074,15 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 		if opts.Limit > 0 && opts.Limit < limit {
 			limit = opts.Limit
 		}
+		if opts.Size > 0 {
+			limit = opts.Size
+
+			if opts.Page > 0 {
+				q = q.Skip((opts.Page - 1) * limit)
+			}
+
+			q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Desc("SeqId")})
+		}
 	}
 	q = q.Limit(limit)
 

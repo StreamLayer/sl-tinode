@@ -106,6 +106,10 @@ message GetOpts {
 	int32 before_id = 5;
 	// Maximum number of results to return
 	int32 limit = 6;
+	// Pagination: Page size
+	int32 size = 7;
+	// Pagination: Page number
+	int32 page = 8;
 }
 
 message GetQuery {
@@ -241,7 +245,7 @@ message ClientDel {
 	// User ID of the subscription to delete
 	string user_id = 5;
 	// Credential to delete.
-	ClientCred cred = 6; 
+	ClientCred cred = 6;
 	// Request to hard-delete messages for all users, if such option is available.
 	bool hard = 7;
 }

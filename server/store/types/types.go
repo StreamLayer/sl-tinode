@@ -1201,6 +1201,9 @@ type QueryOpt struct {
 	Before int
 	// Common parameter
 	Limit int
+	// Pagination parameters
+	Page int
+	Size int
 }
 
 // TopicCat is an enum of topic categories.
