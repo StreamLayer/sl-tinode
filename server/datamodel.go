@@ -32,6 +32,9 @@ type MsgGetOpts struct {
 	BeforeId int `json:"before,omitempty"`
 	// Limit the number of messages loaded
 	Limit int `json:"limit,omitempty"`
+	// Pagination parameters
+	Page int `json:"page,omitempty"`
+	Size int `json:"size,omitempty"`
 }
 
 // MsgGetQuery is a topic metadata or data query.

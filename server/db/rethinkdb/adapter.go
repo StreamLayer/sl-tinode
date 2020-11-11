@@ -1059,6 +1059,7 @@ func (a *adapter) TopicGet(topic string) (*t.Topic, error) {
 func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) ([]t.Subscription, error) {
 	// Fetch user's subscriptions
 	q := rdb.DB(a.dbName).Table("subscriptions").GetAllByIndex("User", uid.String())
+	//.OrderBy(rdb.OrderByOpts{Index: rdb.Desc("SeqId")})
 	if !keepDeleted {
 		// Filter out rows with defined DeletedAt
 		q = q.Filter(rdb.Row.HasFields("DeletedAt").Not())
@@ -1080,8 +1081,6 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 			if opts.Page > 0 {
 				q = q.Skip((opts.Page - 1) * limit)
 			}
-
-			q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Desc("SeqId")})
 		}
 	}
 	q = q.Limit(limit)
