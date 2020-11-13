@@ -490,8 +490,8 @@ func pbGetQuerySerialize(in *MsgGetQuery) *pbx.GetQuery {
 			IfModifiedSince: timeToInt64(in.Sub.IfModifiedSince),
 			User:            in.Sub.User,
 			Topic:           in.Sub.Topic,
-			Page:            int32(in.Sub.Page),
-			Size:            int32(in.Sub.Size),
+			Order:           in.Sub.Order,
+			LastCreatedAt:   timeToInt64(in.Sub.LastCreatedAt),
 			Limit:           int32(in.Sub.Limit)}
 	}
 	if in.Data != nil {
@@ -518,8 +518,8 @@ func pbGetQueryDeserialize(in *pbx.GetQuery) *MsgGetQuery {
 		if sub := in.GetSub(); sub != nil {
 			msg.Sub = &MsgGetOpts{
 				IfModifiedSince: int64ToTime(sub.GetIfModifiedSince()),
-				Page:            int(sub.GetPage()),
-				Size:            int(sub.GetSize()),
+				Order:           sub.GetOrder(),
+				LastCreatedAt:   int64ToTime(sub.GetLastCreatedAt()),
 				Limit:           int(sub.GetLimit()),
 			}
 		}
@@ -784,6 +784,7 @@ func pbTopicSubSerialize(sub *MsgTopicSub) *pbx.TopicSub {
 	out := &pbx.TopicSub{
 		UpdatedAt: timeToInt64(sub.UpdatedAt),
 		DeletedAt: timeToInt64(sub.DeletedAt),
+		CreatedAt: timeToInt64(&sub.CreatedAt),
 		Online:    sub.Online,
 		Acs:       pbAccessModeSerialize(&sub.Acs),
 		ReadId:    int32(sub.ReadSeqId),

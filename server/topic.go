@@ -2141,6 +2141,8 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 			uid := types.ParseUid(sub.User)
 			isReader := (sub.ModeGiven & sub.ModeWant).IsReader()
 			if t.cat == types.TopicCatMe {
+				mts.CreatedAt = sub.GetCreatedAt()
+
 				// Mark subscriptions that the user does not care about.
 				if !(sub.ModeWant & sub.ModeGiven).IsJoiner() {
 					banned = true

@@ -889,6 +889,8 @@ type Subscription struct {
 
 	// Topic's or user's state.
 	state ObjState
+
+	CreatedAt time.Time `bson:",omitempty"`
 }
 
 // SetPublic assigns to public, otherwise not accessible from outside the package.
@@ -940,6 +942,11 @@ func (s *Subscription) SetSeqId(id int) {
 // GetLastSeen returns lastSeen.
 func (s *Subscription) GetLastSeen() time.Time {
 	return s.lastSeen
+}
+
+// GetLastSeen returns lastSeen.
+func (s *Subscription) GetCreatedAt() time.Time {
+	return s.CreatedAt
 }
 
 // GetUserAgent returns userAgent.
@@ -1201,9 +1208,10 @@ type QueryOpt struct {
 	Before int
 	// Common parameter
 	Limit int
-	// Pagination parameters
-	Page int
-	Size int
+	// asc/desc
+	Order string
+	// last timestamp for pagination
+	LastCreatedAt *time.Time
 }
 
 // TopicCat is an enum of topic categories.
