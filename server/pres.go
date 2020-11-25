@@ -245,6 +245,11 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 				continue
 			}
 			if types.GetTopicCat(topic) == types.TopicCatGrp {
+				// Stop spam after UA change by user
+				if what == "ua" && !(ua == "on" || ua == "off") {
+					continue
+				}
+
 				notifyOn = topic
 			}
 		}
