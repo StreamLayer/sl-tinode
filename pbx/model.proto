@@ -106,6 +106,9 @@ message GetOpts {
 	int32 before_id = 5;
 	// Maximum number of results to return
 	int32 limit = 6;
+	// Order: asc, desc
+	string order = 7;
+	int64 lastCreatedAt = 8;
 }
 
 message GetQuery {
@@ -241,7 +244,7 @@ message ClientDel {
 	// User ID of the subscription to delete
 	string user_id = 5;
 	// Credential to delete.
-	ClientCred cred = 6; 
+	ClientCred cred = 6;
 	// Request to hard-delete messages for all users, if such option is available.
 	bool hard = 7;
 }
@@ -313,6 +316,7 @@ message TopicDesc {
 message TopicSub {
 	int64 updated_at = 1;
 	int64 deleted_at = 2;
+	int64 created_at = 16;
 
 	bool online = 3;
 

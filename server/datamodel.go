@@ -32,6 +32,9 @@ type MsgGetOpts struct {
 	BeforeId int `json:"before,omitempty"`
 	// Limit the number of messages loaded
 	Limit int `json:"limit,omitempty"`
+	// Pagination parameters
+	Order         string     `json:"order,omitempty"`
+	LastCreatedAt *time.Time `json:"lastCreatedAt,omitempty"`
 }
 
 // MsgGetQuery is a topic metadata or data query.
@@ -448,6 +451,8 @@ type MsgTopicSub struct {
 	UpdatedAt *time.Time `json:"updated,omitempty"`
 	// Timestamp when the subscription was deleted
 	DeletedAt *time.Time `json:"deleted,omitempty"`
+	// Timestamp when the subscription was created
+	CreatedAt time.Time `json:"created,omitempty"`
 
 	// If the subscriber/topic is online
 	Online bool `json:"online,omitempty"`

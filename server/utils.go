@@ -210,6 +210,8 @@ func msgOpts2storeOpts(req *MsgGetOpts) *types.QueryOpt {
 			Topic:           req.Topic,
 			IfModifiedSince: req.IfModifiedSince,
 			Limit:           req.Limit,
+			Order:           req.Order,
+			LastCreatedAt:   req.LastCreatedAt,
 			Since:           req.SinceId,
 			Before:          req.BeforeId,
 		}

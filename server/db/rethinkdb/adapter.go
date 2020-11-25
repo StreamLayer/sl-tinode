@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"hash/fnv"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -992,6 +993,10 @@ func (a *adapter) TopicCreate(topic *t.Topic) error {
 	return err
 }
 
+func timeToInt64(ts time.Time) int64 {
+	return ts.UnixNano() / int64(time.Millisecond)
+}
+
 // TopicCreateP2P given two users creates a p2p topic
 func (a *adapter) TopicCreateP2P(initiator, invited *t.Subscription) error {
 	initiator.Id = initiator.Topic + ":" + initiator.User
@@ -1055,26 +1060,46 @@ func (a *adapter) TopicGet(topic string) (*t.Topic, error) {
 }
 
 // TopicsForUser loads user's contact list: p2p and grp topics, except for 'me' & 'fnd' subscriptions.
-// Reads and denormalizes Public value.
+// Reads and denormalizes Public value. 89277082226
+// r.db("tinode").table('subscriptions').indexCreate('user_createdAt', [r.row("User"), r.row("CreatedAt")]);
 func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) ([]t.Subscription, error) {
 	// Fetch user's subscriptions
-	q := rdb.DB(a.dbName).Table("subscriptions").GetAllByIndex("User", uid.String())
+	q := rdb.DB(a.dbName).Table("subscriptions")
+	limit := a.maxResults
+	userId := uid.String()
+
+	if opts != nil {
+		from := []interface{}{userId, rdb.MinVal}
+		to := []interface{}{userId, rdb.MaxVal}
+
+		if opts.LastCreatedAt != nil {
+			if opts.Order == "desc" {
+				to = []interface{}{userId, opts.LastCreatedAt}
+			} else {
+				from = []interface{}{userId, opts.LastCreatedAt}
+			}
+		}
+
+		q = q.Between(from, to, rdb.BetweenOpts{Index: "user_createdAt"})
+
+		if opts.Order == "desc" {
+			q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Desc("user_createdAt")})
+		} else {
+			q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Asc("user_createdAt")})
+		}
+
+		if opts.Limit > 0 && opts.Limit < limit {
+			limit = opts.Limit
+		}
+	} else {
+		q = q.GetAllByIndex("User", userId)
+	}
+
 	if !keepDeleted {
 		// Filter out rows with defined DeletedAt
 		q = q.Filter(rdb.Row.HasFields("DeletedAt").Not())
 	}
-	limit := a.maxResults
-	if opts != nil {
-		// Ignore IfModifiedSince - we must return all entries
-		// Those unmodified will be stripped of Public & Private.
 
-		if opts.Topic != "" {
-			q = q.Filter(rdb.Row.Field("Topic").Eq(opts.Topic))
-		}
-		if opts.Limit > 0 && opts.Limit < limit {
-			limit = opts.Limit
-		}
-	}
 	q = q.Limit(limit)
 
 	cursor, err := q.Run(a.conn)
@@ -1172,6 +1197,16 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 			}
 		}
 		cursor.Close()
+	}
+
+	if opts != nil && opts.Order == "desc" {
+		sort.Slice(subs, func(i, j int) bool {
+			return timeToInt64(subs[i].CreatedAt) > timeToInt64(subs[j].CreatedAt)
+		})
+	} else {
+		sort.Slice(subs, func(i, j int) bool {
+			return timeToInt64(subs[i].CreatedAt) < timeToInt64(subs[j].CreatedAt)
+		})
 	}
 
 	return subs, nil
