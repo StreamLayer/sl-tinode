@@ -108,7 +108,7 @@ message GetOpts {
 	int32 limit = 6;
 	// Order: asc, desc
 	string order = 7;
-	int64 lastCreatedAt = 8;
+	int64 last_created_at = 8;
 }
 
 message GetQuery {
