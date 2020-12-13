@@ -67,9 +67,12 @@ func (a *adapter) Open(jsonconfig json.RawMessage) error {
 		return errors.New("adapter rethinkdb is already connected")
 	}
 
+	if len(jsonconfig) < 2 {
+		return errors.New("adapter rethinkdb missing config")
+	}
+
 	var err error
 	var config configType
-
 	if err = json.Unmarshal(jsonconfig, &config); err != nil {
 		return errors.New("adapter rethinkdb failed to parse config: " + err.Error())
 	}
@@ -1815,6 +1818,7 @@ func (a *adapter) MessageGetDeleted(topic string, forUser t.Uid, opts *t.QueryOp
 	return dmsgs, nil
 }
 
+// Delete all messages in the topic.
 func (a *adapter) messagesHardDelete(topic string) error {
 	var err error
 
@@ -1847,6 +1851,7 @@ func (a *adapter) MessageDeleteList(topic string, toDel *t.DelMessage) error {
 	var err error
 
 	if toDel == nil {
+		// Delete all messages.
 		err = a.messagesHardDelete(topic)
 	} else {
 		// Only some messages are being deleted

@@ -77,6 +77,10 @@ func (a *adapter) Open(jsonconfig json.RawMessage) error {
 		return errors.New("adapter mongodb is already connected")
 	}
 
+	if len(jsonconfig) < 2 {
+		return errors.New("adapter mongodb missing config")
+	}
+
 	var err error
 	var config configType
 	if err = json.Unmarshal(jsonconfig, &config); err != nil {
@@ -1225,6 +1229,7 @@ func (a *adapter) TopicGet(topic string) (*t.Topic, error) {
 		}
 		return nil, err
 	}
+	tpc.Public = unmarshalBsonD(tpc.Public)
 	return tpc, nil
 }
 
@@ -1920,6 +1925,7 @@ func (a *adapter) MessageDeleteList(topic string, toDel *t.DelMessage) error {
 	var err error
 
 	if toDel == nil {
+		// No filter: delete all messages.
 		return a.messagesHardDelete(topic)
 	}
 
@@ -1940,7 +1946,7 @@ func (a *adapter) MessageDeleteList(topic string, toDel *t.DelMessage) error {
 		rangeFilter := b.A{}
 		for _, rng := range toDel.SeqIdRanges {
 			if rng.Hi == 0 {
-				rangeFilter = append(rangeFilter, b.M{"seqid": b.M{"$gte": rng.Low}})
+				rangeFilter = append(rangeFilter, b.M{"seqid": rng.Low})
 			} else {
 				rangeFilter = append(rangeFilter, b.M{"seqid": b.M{"$gte": rng.Low, "$lte": rng.Hi}})
 			}
@@ -2313,12 +2319,12 @@ func normalizeUpdateMap(update map[string]interface{}) map[string]interface{} {
 
 // Recursive unmarshalling of bson.D type.
 // Mongo drivers unmarshalling into interface{} creates bson.D object for maps and bson.A object for slices.
-// We need manually unmarshal them into correct type - bson.M (map[string]interface{}).
+// We need manually unmarshal them into correct types: map[string]interface{} and []interface{] respectively.
 func unmarshalBsonD(bsonObj interface{}) interface{} {
 	if obj, ok := bsonObj.(b.D); ok && len(obj) != 0 {
-		result := make(b.M, 0)
-		for k, v := range obj.Map() {
-			result[k] = unmarshalBsonD(v)
+		result := make(map[string]interface{})
+		for key, val := range obj.Map() {
+			result[key] = unmarshalBsonD(val)
 		}
 		return result
 	} else if obj, ok := bsonObj.(primitive.Binary); ok {
@@ -2326,7 +2332,7 @@ func unmarshalBsonD(bsonObj interface{}) interface{} {
 		return obj.Data
 	} else if obj, ok := bsonObj.(b.A); ok {
 		// in case of array of bson.D objects
-		result := make(b.A, 0)
+		var result []interface{}
 		for _, elem := range obj {
 			result = append(result, unmarshalBsonD(elem))
 		}

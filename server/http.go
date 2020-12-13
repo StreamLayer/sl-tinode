@@ -309,6 +309,8 @@ func getHttpAuth(req *http.Request) (method, secret string) {
 	// Check URL query parameters.
 	if method = req.URL.Query().Get("auth"); method != "" {
 		secret = req.URL.Query().Get("secret")
+		// Convert base64 URL-encoding to standard encoding.
+		secret = strings.NewReplacer("-", "+", "_", "/").Replace(secret)
 		return
 	}
 
@@ -338,7 +340,7 @@ func authHttpRequest(req *http.Request) (types.Uid, []byte, error) {
 		}
 
 		if authhdl := store.GetLogicalAuthHandler(authMethod); authhdl != nil {
-			rec, challenge, err := authhdl.Authenticate(decodedSecret[:n])
+			rec, challenge, err := authhdl.Authenticate(decodedSecret[:n], getRemoteAddr(req))
 			if err != nil {
 				return uid, nil, err
 			}

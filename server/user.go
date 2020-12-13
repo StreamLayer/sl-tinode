@@ -29,7 +29,7 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	}
 
 	// Check if login is unique.
-	if ok, err := authhdl.IsUnique(msg.Acc.Secret); !ok {
+	if ok, err := authhdl.IsUnique(msg.Acc.Secret, s.remoteAddr); !ok {
 		log.Println("create user: auth secret is not unique", err, s.sid)
 		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp,
 			map[string]interface{}{"what": "auth"}))
@@ -124,7 +124,7 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	}
 
 	// Add authentication record. The authhdl.AddRecord may change tags.
-	rec, err := authhdl.AddRecord(&auth.Rec{Uid: user.Uid(), Tags: user.Tags}, msg.Acc.Secret)
+	rec, err := authhdl.AddRecord(&auth.Rec{Uid: user.Uid(), Tags: user.Tags}, msg.Acc.Secret, s.remoteAddr)
 	if err != nil {
 		log.Println("create user: add auth record failed", err, s.sid)
 		// Attempt to delete incomplete user record
@@ -149,7 +149,7 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	tmpToken, _, _ := store.GetLogicalAuthHandler("token").GenSecret(&auth.Rec{
 		Uid:       user.Uid(),
 		AuthLevel: auth.LevelNone,
-		Lifetime:  time.Hour * 24,
+		Lifetime:  auth.Duration(time.Hour * 24),
 		Features:  auth.FeatureNoLogin})
 	validated, _, err := addCreds(user.Uid(), creds, rec.Tags, s.lang, tmpToken)
 	if err != nil {
@@ -249,7 +249,7 @@ func replyUpdateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 
 	var params map[string]interface{}
 	if msg.Acc.Scheme != "" {
-		err = updateUserAuth(msg, user, rec)
+		err = updateUserAuth(msg, user, rec, s.remoteAddr)
 	} else if len(msg.Acc.Cred) > 0 {
 		if authLvl == auth.LevelNone {
 			// msg.Acc.AuthLevel contains invalid data.
@@ -261,7 +261,7 @@ func replyUpdateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 		tmpToken, _, _ := store.GetLogicalAuthHandler("token").GenSecret(&auth.Rec{
 			Uid:       uid,
 			AuthLevel: auth.LevelNone,
-			Lifetime:  time.Hour * 24,
+			Lifetime:  auth.Duration(time.Hour * 24),
 			Features:  auth.FeatureNoLogin})
 		_, _, err := addCreds(uid, msg.Acc.Cred, nil, s.lang, tmpToken)
 		if err == nil {
@@ -300,14 +300,14 @@ func replyUpdateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 }
 
 // Authentication update
-func updateUserAuth(msg *ClientComMessage, user *types.User, rec *auth.Rec) error {
+func updateUserAuth(msg *ClientComMessage, user *types.User, rec *auth.Rec, remoteAddr string) error {
 	authhdl := store.GetLogicalAuthHandler(msg.Acc.Scheme)
 	if authhdl != nil {
 		// Request to update auth of an existing account. Only basic & rest auth are currently supported
 
 		// TODO(gene): support adding new auth schemes
 
-		rec, err := authhdl.UpdateRecord(&auth.Rec{Uid: user.Uid(), Tags: user.Tags}, msg.Acc.Secret)
+		rec, err := authhdl.UpdateRecord(&auth.Rec{Uid: user.Uid(), Tags: user.Tags}, msg.Acc.Secret, remoteAddr)
 		if err != nil {
 			return err
 		}
@@ -560,7 +560,6 @@ func changeUserState(s *Session, uid types.Uid, user *types.User, msg *ClientCom
 // 6. Report success or failure.
 // 7. Terminate user's last session.
 func replyDelUser(s *Session, msg *ClientComMessage) {
-	var reply *ServerComMessage
 	var uid types.Uid
 
 	if msg.Del.User == "" || msg.Del.User == s.uid.UserId() {
@@ -570,64 +569,70 @@ func replyDelUser(s *Session, msg *ClientComMessage) {
 		// Delete another user.
 		uid = types.ParseUserId(msg.Del.User)
 		if uid.IsZero() {
-			reply = ErrMalformed(msg.Id, "", msg.Timestamp)
 			log.Println("replyDelUser: invalid user ID", msg.Del.User, s.sid)
+			s.queueOut(ErrMalformed(msg.Id, "", msg.Timestamp))
+			return
 		}
 	} else {
-		reply = ErrPermissionDenied(msg.Id, "", msg.Timestamp)
 		log.Println("replyDelUser: illegal attempt to delete another user", msg.Del.User, s.sid)
+		s.queueOut(ErrPermissionDenied(msg.Id, "", msg.Timestamp))
+		return
 	}
 
-	if reply == nil {
-		// Disable all authenticators
-		authnames := store.GetAuthNames()
-		for _, name := range authnames {
-			if err := store.GetAuthHandler(name).DelRecords(uid); err != nil {
-				// This could be completely benign, i.e. authenticator exists but not used.
-				log.Println("replyDelUser: failed to delete auth record", uid.UserId(), name, err, s.sid)
+	// Disable all authenticators
+	authnames := store.GetAuthNames()
+	for _, name := range authnames {
+		if err := store.GetAuthHandler(name).DelRecords(uid); err != nil {
+			// This could be completely benign, i.e. authenticator exists but not used.
+			log.Println("replyDelUser: failed to delete auth record", uid.UserId(), name, err, s.sid)
+			if storeErr, ok := err.(types.StoreError); ok && storeErr == types.ErrUnsupported {
+				// Authenticator refused to delete record: user account cannot be deleted.
+				s.queueOut(ErrOperationNotAllowed(msg.Id, "", msg.Timestamp))
+				return
 			}
-		}
-
-		// Terminate all sessions. Skip the current session so the requester gets a response.
-		globals.sessionStore.EvictUser(uid, s.sid)
-		// Remove user from cache and announce to cluster that the user is deleted.
-		usersRemoveUser(uid)
-
-		// Stop topics where the user is the owner and p2p topics.
-		done := make(chan bool)
-		globals.hub.unreg <- &topicUnreg{forUser: uid, del: msg.Del.Hard, done: done}
-		<-done
-
-		// Notify users of interest that the user is gone.
-		if uoi, err := store.Users.GetSubs(uid, nil); err == nil {
-			presUsersOfInterestOffline(uid, uoi, "gone")
-		} else {
-			log.Println("replyDelUser: failed to send notifications to users", err, s.sid)
-		}
-
-		// Notify subscribers of the group topics where the user was the owner that the topics were deleted.
-		if ownTopics, err := store.Users.GetOwnTopics(uid); err == nil {
-			for _, topicName := range ownTopics {
-				if subs, err := store.Topics.GetSubs(topicName, nil); err == nil {
-					presSubsOfflineOffline(topicName, types.TopicCatGrp, subs, "gone", &presParams{}, s.sid)
-				}
-			}
-		} else {
-			log.Println("replyDelUser: failed to send notifications to owned topics", err, s.sid)
-		}
-
-		// TODO: suspend all P2P topics with the user.
-
-		// Delete user's records from the database.
-		if err := store.Users.Delete(uid, msg.Del.Hard); err != nil {
-			reply = decodeStoreError(err, msg.Id, "", msg.Timestamp, nil)
-			log.Println("replyDelUser: failed to delete user", err, s.sid)
-		} else {
-			reply = NoErr(msg.Id, "", msg.Timestamp)
 		}
 	}
 
-	s.queueOut(reply)
+	// Terminate all sessions. Skip the current session so the requester gets a response.
+	globals.sessionStore.EvictUser(uid, s.sid)
+	// Remove user from cache and announce to cluster that the user is deleted.
+	usersRemoveUser(uid)
+
+	// Stop topics where the user is the owner and p2p topics.
+	done := make(chan bool)
+	globals.hub.unreg <- &topicUnreg{forUser: uid, del: msg.Del.Hard, done: done}
+	<-done
+
+	// Notify users of interest that the user is gone.
+	if uoi, err := store.Users.GetSubs(uid, nil); err == nil {
+		presUsersOfInterestOffline(uid, uoi, "gone")
+	} else {
+		log.Println("replyDelUser: failed to send notifications to users", err, s.sid)
+	}
+
+	// Notify subscribers of the group topics where the user was the owner that the topics were deleted.
+	if ownTopics, err := store.Users.GetOwnTopics(uid); err == nil {
+		for _, topicName := range ownTopics {
+			if subs, err := store.Topics.GetSubs(topicName, nil); err == nil {
+				presSubsOfflineOffline(topicName, types.TopicCatGrp, subs, "gone", &presParams{}, s.sid)
+			} else {
+				log.Println("replyDelUser: failed to notify topic subscribers", err, topicName, s.sid)
+			}
+		}
+	} else {
+		log.Println("replyDelUser: failed to send notifications to owned topics", err, s.sid)
+	}
+
+	// TODO: suspend all P2P topics with the user.
+
+	// Delete user's records from the database.
+	if err := store.Users.Delete(uid, msg.Del.Hard); err != nil {
+		log.Println("replyDelUser: failed to delete user", err, s.sid)
+		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		return
+	}
+
+	s.queueOut(NoErr(msg.Id, "", msg.Timestamp))
 
 	if s.uid == uid && s.multi == nil {
 		// Evict the current session if it belongs to the deleted user.
@@ -689,8 +694,8 @@ func usersInit() {
 
 // Shutdown users cache.
 func usersShutdown() {
-	if globals.statsUpdate != nil {
-		globals.statsUpdate <- nil
+	if globals.usersUpdate != nil {
+		globals.usersUpdate <- nil
 	}
 }
 
