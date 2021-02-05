@@ -260,7 +260,7 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 			}
 
 			// if notify available, send push to user friends
-			if uaPayload["isPrivate"] == false && uaPayload["actionType"] == "watch_party" && wpNotified != true {
+			if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && wpNotified != true {
 				for userId := range t.perSubs {
 					if types.GetTopicCat(userId) == types.TopicCatMe && userId != ownerId {
 						receipt := push.Receipt{
