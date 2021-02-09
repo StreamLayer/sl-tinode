@@ -452,7 +452,7 @@ type MsgTopicSub struct {
 	// Timestamp when the subscription was deleted
 	DeletedAt *time.Time `json:"deleted,omitempty"`
 	// Timestamp when the subscription was created
-	CreatedAt time.Time `json:"created,omitempty"`
+	CreatedAt *time.Time `json:"created,omitempty"`
 
 	// If the subscriber/topic is online
 	Online bool `json:"online,omitempty"`

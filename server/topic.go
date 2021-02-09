@@ -1296,6 +1296,7 @@ func (t *Topic) thisUserSub(h *Hub, sess *Session, pkt *ClientComMessage, asUid 
 				ModeWant:  userData.modeWant,
 				ModeGiven: userData.modeGiven,
 				Private:   userData.private,
+				CreatedAt: now,
 			}
 
 			if err := store.Subs.Create(sub); err != nil {
@@ -1618,6 +1619,7 @@ func (t *Topic) anotherUserSub(h *Hub, sess *Session, asUid, target types.Uid,
 			Topic:     t.name,
 			ModeWant:  modeWant,
 			ModeGiven: modeGiven,
+			CreatedAt: now,
 		}
 
 		if err := store.Subs.Create(sub); err != nil {
@@ -2146,7 +2148,8 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 			uid := types.ParseUid(sub.User)
 			isReader := (sub.ModeGiven & sub.ModeWant).IsReader()
 			if t.cat == types.TopicCatMe {
-				mts.CreatedAt = sub.GetCreatedAt()
+				createdAt := sub.GetCreatedAt()
+				mts.CreatedAt = &createdAt
 
 				// Mark subscriptions that the user does not care about.
 				if !(sub.ModeWant & sub.ModeGiven).IsJoiner() {

@@ -1616,7 +1616,6 @@ func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string) ([]t.Subscr
 			// Skip the callee
 			continue
 		}
-		sub.CreatedAt = user.CreatedAt
 		sub.UpdatedAt = user.UpdatedAt
 		sub.User = user.Id
 		sub.SetPublic(user.Public)
@@ -1687,7 +1686,6 @@ func (a *adapter) FindTopics(req [][]string, opt []string) ([]t.Subscription, er
 	var sub t.Subscription
 	var subs []t.Subscription
 	for cursor.Next(&topic) {
-		sub.CreatedAt = topic.CreatedAt
 		sub.UpdatedAt = topic.UpdatedAt
 		if topic.UseBt {
 			sub.Topic = t.GrpToChn(topic.Id)
