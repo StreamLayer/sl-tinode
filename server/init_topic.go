@@ -220,6 +220,7 @@ func initTopicFnd(t *Topic, sreg *sessionJoin) error {
 // There is a reace condition when two users try to create a p2p topic at the same time.
 func initTopicP2P(t *Topic, sreg *sessionJoin) error {
 	pktsub := sreg.pkt.Sub
+	now := types.TimeNow()
 
 	// Handle the following cases:
 	// 1. Neither topic nor subscriptions exist: create a new p2p topic & subscriptions.
@@ -357,6 +358,7 @@ func initTopicP2P(t *Topic, sreg *sessionJoin) error {
 
 			// Swap Public to match swapped Public in subs returned from store.Topics.GetSubs
 			sub2.SetPublic(users[u1].Public)
+			sub2.CreatedAt = now
 
 			// Mark the entire topic as new.
 			pktsub.Created = true
@@ -416,6 +418,7 @@ func initTopicP2P(t *Topic, sreg *sessionJoin) error {
 				Private:   userData.private}
 			// Swap Public to match swapped Public in subs returned from store.Topics.GetSubs
 			sub1.SetPublic(users[u2].Public)
+			sub1.CreatedAt = now
 
 			// Mark this subscription as new
 			pktsub.Newsub = true
@@ -453,6 +456,7 @@ func initTopicP2P(t *Topic, sreg *sessionJoin) error {
 			} else {
 				subToMake = sub2
 			}
+			subToMake.CreatedAt = now
 			if err = store.Subs.Create(subToMake); err != nil {
 				return err
 			}

@@ -211,6 +211,7 @@ func genDb(data *Data) {
 			&types.Subscription{
 				ObjHeader: types.ObjHeader{CreatedAt: created},
 				User:      uid1.String(),
+				CreatedAt: created,
 				Topic:     topic,
 				ModeWant:  s0want,
 				ModeGiven: s0given,
@@ -218,6 +219,7 @@ func genDb(data *Data) {
 			&types.Subscription{
 				ObjHeader: types.ObjHeader{CreatedAt: created},
 				User:      uid2.String(),
+				CreatedAt: created,
 				Topic:     topic,
 				ModeWant:  s1want,
 				ModeGiven: s1given,
@@ -260,6 +262,7 @@ func genDb(data *Data) {
 		if err = store.Subs.Create(&types.Subscription{
 			ObjHeader: types.ObjHeader{CreatedAt: getCreatedTime(ss.CreatedAt)},
 			User:      nameIndex[ss.User],
+			CreatedAt: getCreatedTime(ss.CreatedAt),
 			Topic:     tname,
 			ModeWant:  want,
 			ModeGiven: given,

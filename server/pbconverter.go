@@ -784,7 +784,7 @@ func pbTopicSubSerialize(sub *MsgTopicSub) *pbx.TopicSub {
 	out := &pbx.TopicSub{
 		UpdatedAt: timeToInt64(sub.UpdatedAt),
 		DeletedAt: timeToInt64(sub.DeletedAt),
-		CreatedAt: timeToInt64(&sub.CreatedAt),
+		CreatedAt: timeToInt64(sub.CreatedAt),
 		Online:    sub.Online,
 		Acs:       pbAccessModeSerialize(&sub.Acs),
 		ReadId:    int32(sub.ReadSeqId),
