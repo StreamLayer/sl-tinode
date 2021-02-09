@@ -2148,8 +2148,8 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 			uid := types.ParseUid(sub.User)
 			isReader := (sub.ModeGiven & sub.ModeWant).IsReader()
 			if t.cat == types.TopicCatMe {
-				// createdAt := sub.GetCreatedAt()
-				// mts.CreatedAt = &createdAt
+				createdAt := sub.GetCreatedAt()
+				mts.CreatedAt = &createdAt
 
 				// Mark subscriptions that the user does not care about.
 				if !(sub.ModeWant & sub.ModeGiven).IsJoiner() {

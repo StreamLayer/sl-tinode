@@ -456,7 +456,6 @@ func initTopicP2P(t *Topic, sreg *sessionJoin) error {
 			} else {
 				subToMake = sub2
 			}
-			subToMake.CreatedAt = now
 			if err = store.Subs.Create(subToMake); err != nil {
 				return err
 			}
