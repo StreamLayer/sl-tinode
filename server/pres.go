@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
+	"reflect"
+	"regexp"
 	"strings"
 
+	"github.com/tinode/chat/server/push"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 )
@@ -234,6 +238,53 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 	parts := strings.Split(what, "+")
 	wantReply := parts[0] == "on"
 	goOffline := len(parts) > 1 && parts[1] == "dis"
+	watchPartyRe := regexp.MustCompile(`\{(.*?)\}$`)
+
+	if what == "ua" && !(ua == "on" || ua == "off") {
+		// search json payload in ua string
+		match := watchPartyRe.Find([]byte(ua))
+
+		if match != nil {
+			// parse ua string
+			var uaPayload map[string]interface{}
+			json.Unmarshal([]byte(match), &uaPayload)
+			topicId := uaPayload["topicId"].(string)
+			ownerId := uaPayload["ownerId"].(string)
+
+			// get topic data, to check notified flag
+			topic, _ := store.Topics.Get(topicId)
+			topicData := reflect.ValueOf(topic.Public).Interface().(map[string]interface{})
+			wpNotified := false
+			if topicData["wpNotified"] != nil {
+				wpNotified = topicData["wpNotified"].(bool)
+			}
+
+			// if notify available, send push to user friends
+			if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && wpNotified != true {
+				for userId := range t.perSubs {
+					if types.GetTopicCat(userId) == types.TopicCatMe && userId != ownerId {
+						receipt := push.Receipt{
+							To: make(map[types.Uid]push.Recipient, t.subsCount()),
+							Payload: push.Payload{
+								What:      push.ActMsg,
+								Silent:    false,
+								Topic:     topicId,
+								From:      ownerId,
+								Timestamp: types.TimeNow(),
+								SeqId:     t.lastID,
+								Content:   string(match)}}
+
+						receipt.To[types.ParseUserId(userId)] = push.Recipient{}
+						usersPush(&receipt)
+					}
+				}
+
+				// update topic public data, set notified flag to omit spam
+				topicData["wpNotified"] = true
+				store.Topics.Update(topicId, map[string]interface{}{"Public": topicData})
+			}
+		}
+	}
 
 	// Push update to subscriptions
 	for topic, psd := range t.perSubs {
@@ -245,6 +296,11 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 				continue
 			}
 			if types.GetTopicCat(topic) == types.TopicCatGrp {
+				// Stop spam after UA change by user
+				if what == "ua" && !(ua == "on" || ua == "off") {
+					continue
+				}
+
 				notifyOn = topic
 			}
 		}
@@ -473,7 +529,6 @@ func (t *Topic) presSingleUserOffline(uid types.Uid, mode types.AccessMode,
 
 	// ModeInvalid means the user is deleted (pud.deleted == true)
 	if mode != types.ModeInvalid && (presShouldBypassMode(what) || presOfflineFilter(mode, nil)) {
-
 		user := uid.UserId()
 		actor := params.actor
 		target := params.target

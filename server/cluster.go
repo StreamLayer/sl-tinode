@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tinode/chat/server/auth"
@@ -30,7 +31,7 @@ const (
 // ProxyReqType is the type of proxy requests.
 type ProxyReqType int
 
-// Individual request types
+// Individual request types.
 const (
 	ProxyReqNone ProxyReqType = iota
 	ProxyReqJoin
@@ -39,6 +40,18 @@ const (
 	ProxyReqBroadcast
 	ProxyReqBgSession
 	ProxyReqMeUserAgent
+)
+
+// Proxy event types processed in the clusterWriteLoop.
+type ProxyEventType int
+
+// Individual proxy events.
+const (
+	EventSend     ProxyEventType = 1
+	EventStop     ProxyEventType = 2
+	EventDetach   ProxyEventType = 3
+	EventContinue ProxyEventType = 4
+	EventAbort    ProxyEventType = 5
 )
 
 type clusterNodeConfig struct {
@@ -348,7 +361,6 @@ func (n *ClusterNode) callAsync(proc string, req, resp interface{}, done chan *r
 	}
 
 	call := n.endpoint.Go(proc, req, resp, responseChan)
-	call.Done = done
 
 	return call
 }
@@ -479,7 +491,13 @@ func (c *Cluster) TopicMaster(msg *ClusterReq, rejected *bool) error {
 			pkt:  msg.CliMsg,
 			sess: sess,
 		}
-		globals.hub.join <- join
+		select {
+		case globals.hub.join <- join:
+		default:
+			// Reply with a 500 to the user.
+			sess.queueOut(ErrUnknownReply(msg.CliMsg, msg.CliMsg.Timestamp))
+			log.Println("cluster: join req failed - hub.join queue full, topic ", msg.CliMsg.RcptTo, "; orig sid ", sess.sid)
+		}
 
 	case ProxyReqLeave:
 		if t := globals.hub.topicGet(msg.RcptTo); t != nil {
@@ -493,9 +511,14 @@ func (c *Cluster) TopicMaster(msg *ClusterReq, rejected *bool) error {
 
 	case ProxyReqMeta:
 		if t := globals.hub.topicGet(msg.RcptTo); t != nil {
-			t.meta <- &metaReq{
-				pkt:  msg.CliMsg,
-				sess: sess,
+			select {
+			case t.meta <- &metaReq{
+					pkt:  msg.CliMsg,
+					sess: sess,
+				}:
+			default:
+				sess.queueOut(ErrUnknownReply(msg.CliMsg, msg.CliMsg.Timestamp))
+				log.Println("cluster: meta req failed - topic.meta queue full, topic ", msg.CliMsg.RcptTo, "; orig sid ", sess.sid)
 			}
 		} else {
 			log.Println("cluster: meta request for unknown topic", msg.RcptTo)
@@ -504,7 +527,11 @@ func (c *Cluster) TopicMaster(msg *ClusterReq, rejected *bool) error {
 	case ProxyReqBroadcast:
 		// sess could be nil
 		msg.SrvMsg.sess = sess
-		globals.hub.route <- msg.SrvMsg
+		select {
+		case globals.hub.route <- msg.SrvMsg:
+		default:
+			log.Println("cluster: route req failed - hub.route queue full")
+		}
 
 	case ProxyReqBgSession, ProxyReqMeUserAgent:
 		if t := globals.hub.topicGet(msg.RcptTo); t != nil {
@@ -748,7 +775,11 @@ func (c *Cluster) isPartitioned() bool {
 		return false
 	}
 
-	return (len(c.nodes)+1)/2 >= len(c.fo.activeNodes)
+	c.fo.activeNodesLock.RLock()
+	result := (len(c.nodes)+1)/2 >= len(c.fo.activeNodes)
+	c.fo.activeNodesLock.RUnlock()
+
+	return result
 }
 
 func (c *Cluster) makeClusterReq(reqType ProxyReqType, payload interface{}, topic string, sess *Session) *ClusterReq {
@@ -806,6 +837,12 @@ func (c *Cluster) routeToTopicMaster(reqType ProxyReqType, payload interface{}, 
 	if c == nil {
 		// Cluster may be nil due to shutdown.
 		return nil
+	}
+	if sess != nil {
+		if atomic.LoadInt32(&sess.terminating) > 0 {
+			// The session is terminating.
+			return nil
+		}
 	}
 
 	// Find the cluster node which owns the topic, then forward to it.
@@ -1098,6 +1135,44 @@ func (c *Cluster) gcProxySessionsForNode(node string) {
 	}
 }
 
+func (t *Topic) clusterSelectProxyEvent() (event ProxyEventType, s *Session, val *reflect.Value) {
+	t.proxiedLock.Lock()
+	defer func() { t.proxiedLock.Unlock() }()
+
+	if len(t.proxiedSessions) == 0 {
+		return EventAbort, nil, nil
+	}
+	chosen, value, ok := reflect.Select(t.proxiedChannels)
+	if !ok {
+		log.Printf("topic[%s]: clusterWriteLoop EOF - quitting", t.name)
+		return EventAbort, nil, nil
+	}
+	if chosen == 0 {
+		// Sessions added or removed: continue.
+		return EventContinue, nil, nil
+	}
+	if len(t.proxiedSessions) == 0 {
+		log.Printf("topic[%s]: clusterWriteLoop - no more proxied sessions (num proxied channels: %d). Quitting.",
+			t.name, len(t.proxiedChannels))
+		return EventAbort, nil, nil
+	}
+	chosen--
+	sessionIdx := chosen / 3
+	if sessionIdx >= len(t.proxiedSessions) {
+		log.Printf("topic[%s]: clusterWriteLoop - invalid proxiedSessions index %d (num proxied sessions %d)", t.name, chosen, len(t.proxiedSessions))
+		return EventAbort, nil, nil
+	}
+	sess := t.proxiedSessions[sessionIdx]
+	return ProxyEventType(chosen%3 + 1), sess, &value
+}
+
+func (t *Topic) noMoreProxiedSessions() bool {
+	t.proxiedLock.Lock()
+	numProxied := len(t.proxiedSessions)
+	t.proxiedLock.Unlock()
+	return numProxied == 0
+}
+
 // clusterWriteLoop implements write loop for all multiplexing (proxy) sessions
 // attached to a master topic. This function handles all the events send from
 // the master to the original sessions hosted on other nodes.
@@ -1115,21 +1190,11 @@ func (t *Topic) clusterWriteLoop() {
 
 	log.Printf("topic[%s]: starting cluster write loop", t.name)
 	for {
-		chosen, value, ok := reflect.Select(t.proxiedChannels)
-		if !ok {
-			log.Printf("topic[%s]: clusterWriteLoop EOF - quitting", t.name)
-			return
-		}
-		if chosen == 0 {
-			// Sessions added or removed: continue.
-			continue
-		}
-		chosen--
-		sess := t.proxiedSessions[chosen/3]
-
-		switch chosen % 3 {
-		case 0: // sess.send channel.
-			if !ok || sess.clnode.endpoint == nil {
+		// t.m
+		event, sess, value := t.clusterSelectProxyEvent()
+		switch event {
+		case EventSend: // sess.send channel.
+			if sess.clnode.endpoint == nil {
 				// channel closed
 				return
 			}
@@ -1164,12 +1229,11 @@ func (t *Topic) clusterWriteLoop() {
 				log.Printf("cluster: response to proxy failed \"%s\": %s", sess.sid, err.Error())
 				return
 			}
-		case 1: // sess.stop
-			log.Println("cluster: stop msg received - multi sid", sess.sid)
+		case EventStop: // sess.stop
 			if value.Interface() == nil {
 				// Terminating multiplexing session.
 				cleanUp(sess)
-				if len(t.proxiedSessions) == 0 {
+				if t.noMoreProxiedSessions() {
 					return
 				}
 			}
@@ -1178,12 +1242,16 @@ func (t *Topic) clusterWriteLoop() {
 			//  * user is being deleted
 			//  * node shutdown
 			// In both cases the msg does not need to be forwarded to the proxy.
-		case 2: // sess.detach
-			log.Println("cluster: detach msg received", sess.sid)
+		case EventDetach: // sess.detach
 			cleanUp(sess)
-			if len(t.proxiedSessions) == 0 {
+			if t.noMoreProxiedSessions() {
 				return
 			}
+		case EventContinue:
+			// Continue
+		case EventAbort:
+			// Stop the loop.
+			return
 		}
 	}
 }

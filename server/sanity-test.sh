@@ -9,7 +9,7 @@ cleanup() {
   if [ -f "./server" ]; then
     rm ./server
   fi
-  docker stop mysql && docker rm mysql
+  docker stop mysql && docker rm mysql && docker network rm tinode-net
 }
 
 # Reports failure.
@@ -33,6 +33,7 @@ pass() {
 # Brings up a mysql docker container.
 setup() {
   docker info 1>/dev/null 2>&1 || (echo "docker not running" && return 1)
+  docker network create tinode-net || (echo "couldn't create tinode-net docker network" && return 1)
   docker run -p 3306:3306 --name mysql --network tinode-net --env MYSQL_ALLOW_EMPTY_PASSWORD=yes -d mysql:5.7 || return 1
   # This fails to detect when the mysql is actually ready.
   # TODO: figure out why.
@@ -58,21 +59,31 @@ build() {
 
 # Initializes Tinode database.
 init-db() {
-  $GOPATH/bin/tinode-db -config=./tinode.conf -data=../tinode-db/data.json  
+  $GOPATH/bin/tinode-db -config=./tinode.conf -data=../tinode-db/data.json
+}
+
+wait-for() {
+  local port=$1
+  while ! nc -z localhost $port; do
+    sleep 1
+  done
 }
 
 # Brings up a three-node Tinode cluster.
 run-server() {
-  ./run-cluster.sh -s "" start
+  ./run-cluster.sh -s "" start && wait-for 16060
 }
 
 send-requests() {
   local port=$1
   local id=$2
   local outfile=$(mktemp /tmp/tinode-${id}.txt)
-  python3 ../tn-cli/tn-cli.py --host=localhost:${port} --no-login < ../tn-cli/sample-script.txt > $outfile || fail "Test script failed (instance port ${port})"
+  pushd .
+  cd ../tn-cli
+  python tn-cli.py --host=localhost:${port} --no-login < sample-script.txt > $outfile || fail "Test script failed (instance port ${port})"
+  popd
   num_positive_responses=`grep -c '<= 20[0-9]' $outfile`
-  if [ $num_positive_responses -ne 10 ]; then fail "Instance ${port}: unexpected number of 20* responses."; fi
+  if [ $num_positive_responses -ne 10 ]; then fail "Instance ${port}: unexpected number of 20* responses: ${num_positive_responses}. Log file ${outfile}"; fi
   rm $outfile
 }
 

@@ -39,7 +39,7 @@ from tn_globals import stdoutln
 from tn_globals import to_json
 
 APP_NAME = "tn-cli"
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.5"
 PROTOCOL_VERSION = "0"
 LIB_VERSION = pkg_resources.get_distribution("tinode_grpc").version
 GRPC_VERSION = pkg_resources.get_distribution("grpcio").version
@@ -60,6 +60,13 @@ AWAIT_TIMEOUT = 5
 
 # This is needed for gRPC SSL to work correctly.
 os.environ["GRPC_SSL_CIPHER_SUITES"] = "HIGH+ECDSA"
+
+# Setup crash handler: close input reader otherwise a crash
+# makes terminal session unusable.
+def exception_hook(type, value, traceBack):
+    if tn_globals.InputThread != None:
+        tn_globals.InputThread.join(0.3)
+sys.excepthook = exception_hook
 
 # Enable the following variables for debugging.
 # os.environ["GRPC_TRACE"] = "all"
@@ -220,6 +227,8 @@ def getVar(path):
             var = getattr(var, p)
             if x or x == 0:
                 var = var[x]
+    if isinstance(var, bytes):
+      var = var.decode('utf-8')
     return var
 
 # Dereference values, i.e. cmd.val == $usr => cmd.val == <actual value of usr>
@@ -448,47 +457,77 @@ def delMsg(id, cmd, ignored):
         stdoutln("Must specify what to delete")
         return None
 
-    cmd.topic = cmd.topic if cmd.topic else tn_globals.DefaultTopic
-    cmd.user = cmd.user if cmd.user else tn_globals.DefaultUser
     enum_what = None
     before = None
     seq_list = None
     cred = None
     if cmd.what == 'msg':
+        enum_what = pb.ClientDel.MSG
+        cmd.topic = cmd.topic if cmd.topic else tn_globals.DefaultTopic
         if not cmd.topic:
             stdoutln("Must specify topic to delete messages")
             return None
-        enum_what = pb.ClientDel.MSG
-        cmd.user = None
-        if cmd.msglist == 'all':
-            seq_list = [pb.DelQuery(range=pb.SeqRange(low=1, hi=0x8FFFFFF))]
-        elif cmd.msglist != None:
-            seq_list = [pb.DelQuery(seq_id=int(x.strip())) for x in cmd.msglist.split(',')]
+        if cmd.user:
+            stdoutln("Unexpected '--user' parameter")
+            return None
+        if not cmd.seq:
+            stdoutln("Must specify message IDs to delete")
+            return None
+
+        if cmd.seq == 'all':
+            seq_list = [pb.SeqRange(low=1, hi=0x8FFFFFF)]
+        else:
+            # Split a list like '1,2,3,10-22' into ranges.
+            try:
+                seq_list = []
+                for item in cmd.seq.split(','):
+                    if '-' in item:
+                        low, hi = [int(x.strip()) for x in item.split('-')]
+                        if low>=hi or low<=0:
+                            stdoutln("Invalid message ID range {0}-{1}".format(low, hi))
+                            return None
+                        seq_list.append(pb.SeqRange(low=low, hi=hi))
+                    else:
+                        seq_list.append(pb.SeqRange(low=int(item.strip())))
+            except ValueError as err:
+                stdoutln("Invalid message IDs: {0}".format(err))
+                return None
 
     elif cmd.what == 'sub':
+        cmd.topic = cmd.topic if cmd.topic else tn_globals.DefaultTopic
+        cmd.user = cmd.user if cmd.user else tn_globals.DefaultUser
         if not cmd.user or not cmd.topic:
             stdoutln("Must specify topic and user to delete subscription")
             return None
         enum_what = pb.ClientDel.SUB
 
     elif cmd.what == 'topic':
+        cmd.topic = cmd.topic if cmd.topic else tn_globals.DefaultTopic
+        if cmd.user:
+            stdoutln("Unexpected '--user' parameter")
+            return None
         if not cmd.topic:
             stdoutln("Must specify topic to delete")
             return None
         enum_what = pb.ClientDel.TOPIC
-        cmd.user = None
 
     elif cmd.what == 'user':
+        cmd.user = cmd.user if cmd.user else tn_globals.DefaultUser
+        if cmd.topic:
+            stdoutln("Unexpected '--topic' parameter")
+            return None
         enum_what = pb.ClientDel.USER
-        cmd.topic = None
 
     elif cmd.what == 'cred':
+        if cmd.user:
+            stdoutln("Unexpected '--user' parameter")
+            return None
         if cmd.topic != 'me':
             stdoutln("Topic must be 'me'")
             return None
         cred = parse_cred(cmd.cred)
         if cred is None:
-            stdoutln("Topic must be 'me'")
+            stdoutln("Failed to parse credential '{0}'".format(cmd.cred))
             return None
         cred = cred[0]
         enum_what = pb.ClientDel.CRED
@@ -582,7 +621,7 @@ def parse_cmd(parts):
         parser.add_argument('what', default=None, help='what to delete')
         parser.add_argument('--topic', default=None, help='topic being affected')
         parser.add_argument('--user', default=None, help='either delete this user or a subscription with this user')
-        parser.add_argument('--seq', default=None, help='"all" or comma separated list of message IDs to delete')
+        parser.add_argument('--seq', default=None, help='"all" or a list of comma- and dash-separated message IDs to delete, e.g. "1,2,9-12"')
         parser.add_argument('--hard', action='store_true', help='request to hard-delete')
         parser.add_argument('--cred', help='credential to delete in method:value format, e.g. email:test@example.com, tel:12345')
     elif parts[0] == "login":
@@ -1008,7 +1047,7 @@ def read_cookie():
         return params.get("token")
 
     except Exception as err:
-        println("Missing or invalid cookie file '.tn-cli-cookie'", err)
+        printerr("Missing or invalid cookie file '.tn-cli-cookie'", err)
         return None
 
 # Lambda for handling login
@@ -1048,7 +1087,7 @@ def print_server_params(params):
 
 if __name__ == '__main__':
     """Parse command-line arguments. Extract host name and authentication scheme, if one is provided"""
-    version = APP_VERSION + "/" + LIB_VERSION + "; gRPC/" + GRPC_VERSION
+    version = APP_VERSION + "/" + LIB_VERSION + "; gRPC/" + GRPC_VERSION + "; Python " + platform.python_version()
     purpose = "Tinode command line client. Version " + version + "."
 
     parser = argparse.ArgumentParser(description=purpose)
@@ -1098,12 +1137,11 @@ if __name__ == '__main__':
 
         elif tn_globals.IsInteractive:
             """Interactive mode only: try reading the cookie file"""
-            try:
-                schema = 'token'
-                secret = read_cookie()
-                printout("Logging in with cookie file")
-            except Exception as err:
-                printerr("Failed to read authentication cookie", err)
+            printout("Logging in with cookie file")
+            schema = 'token'
+            secret = read_cookie()
+            if not secret:
+                schema = None
 
     # Attempt to load the macro file if available.
     macros = None

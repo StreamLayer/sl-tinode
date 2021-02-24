@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/concurrency"
 	"github.com/tinode/chat/server/push"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -60,6 +61,9 @@ type Topic struct {
 	// proxiedChannels[0] is a special-purpose channel necessary for interrupting
 	// clusterWriteLoop when sessions are added or removed.
 	proxiedChannels []reflect.SelectCase
+	// Guards proxiedSessions and proxiedTopics (not using sync.Mutex here
+	// since we need TryLock functionality).
+	proxiedLock concurrency.SimpleMutex
 
 	// Time when the topic was first created.
 	created time.Time
@@ -1292,6 +1296,7 @@ func (t *Topic) thisUserSub(h *Hub, sess *Session, pkt *ClientComMessage, asUid 
 				ModeWant:  userData.modeWant,
 				ModeGiven: userData.modeGiven,
 				Private:   userData.private,
+				CreatedAt: now,
 			}
 
 			if err := store.Subs.Create(sub); err != nil {
@@ -1326,7 +1331,6 @@ func (t *Topic) thisUserSub(h *Hub, sess *Session, pkt *ClientComMessage, asUid 
 
 	} else {
 		// Process update to existing subscription. It could be an incomplete subscription for a new topic.
-
 		if asChan {
 			// A normal subscriber is trying to access topic as a channel.
 			// Direct the subscriber to use non-channel topic name.
@@ -1475,9 +1479,11 @@ func (t *Topic) thisUserSub(h *Hub, sess *Session, pkt *ClientComMessage, asUid 
 			}
 		}
 
-		// Notify user of the changes in access mode.
+		// Notify actor of the changes in access mode.
 		t.notifySubChange(asUid, asUid, asChan, oldWant, oldGiven, userData.modeWant, userData.modeGiven, sess.sid)
+	}
 
+	if (pkt.Sub != nil && pkt.Sub.Newsub) || oldWant != userData.modeWant || oldGiven != userData.modeGiven {
 		modeChanged = &MsgAccessMode{
 			Want:  userData.modeWant.String(),
 			Given: userData.modeGiven.String(),
@@ -1613,6 +1619,7 @@ func (t *Topic) anotherUserSub(h *Hub, sess *Session, asUid, target types.Uid,
 			Topic:     t.name,
 			ModeWant:  modeWant,
 			ModeGiven: modeGiven,
+			CreatedAt: now,
 		}
 
 		if err := store.Subs.Create(sub); err != nil {
@@ -2141,6 +2148,9 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 			uid := types.ParseUid(sub.User)
 			isReader := (sub.ModeGiven & sub.ModeWant).IsReader()
 			if t.cat == types.TopicCatMe {
+				createdAt := sub.GetCreatedAt()
+				mts.CreatedAt = &createdAt
+
 				// Mark subscriptions that the user does not care about.
 				if !(sub.ModeWant & sub.ModeGiven).IsJoiner() {
 					banned = true
@@ -2446,7 +2456,7 @@ func (t *Topic) replySetTags(sess *Session, asUid types.Uid, msg *ClientComMessa
 					resp = ErrUnknownReply(msg, now)
 				} else {
 					t.tags = tags
-					t.presSubsOnline("tags", "", nilPresParams, &presFilters{singleUser: asUid.UserId()}, "")
+					t.presSubsOnline("tags", "", nilPresParams, &presFilters{singleUser: asUid.UserId()}, sess.sid)
 
 					params := make(map[string]interface{})
 					if len(added) > 0 {
@@ -2525,7 +2535,7 @@ func (t *Topic) replySetCred(sess *Session, asUid types.Uid, authLevel auth.Leve
 		tmpToken, _, _ := store.GetLogicalAuthHandler("token").GenSecret(&auth.Rec{
 			Uid:       asUid,
 			AuthLevel: auth.LevelNone,
-			Lifetime:  time.Hour * 24,
+			Lifetime:  auth.Duration(time.Hour * 24),
 			Features:  auth.FeatureNoLogin})
 		_, tags, err = addCreds(asUid, creds, nil, sess.lang, tmpToken)
 	}
@@ -3148,11 +3158,12 @@ func (t *Topic) pushForSub(fromUid, toUid types.Uid, want, given types.AccessMod
 // FIXME: this won't work correctly with multiplexing sessions.
 func (t *Topic) mostRecentSession() *Session {
 	var sess *Session
-	var latest time.Time
+	var latest int64
 	for s := range t.sessions {
-		if s.lastAction.After(latest) {
+		sessionLastAction := atomic.LoadInt64(&s.lastAction)
+		if sessionLastAction > latest {
 			sess = s
-			latest = s.lastAction
+			latest = sessionLastAction
 		}
 	}
 	return sess
@@ -3341,29 +3352,46 @@ func (t *Topic) subsCount() int {
 
 // Adds a new multiplex proxied session to the topic's clusterWriteLoop.
 func (t *Topic) addProxiedSession(s *Session) {
+	// Send an interrupt signal to clusterWriteLoop that a new session
+	// is being added and acquire the lock.
+	if len(t.proxiedChannels) > 0 {
+		interruptChan := t.proxiedChannels[0].Chan.Interface().(chan struct{})
+		for !t.proxiedLock.TryLock() {
+			interruptChan <- struct{}{}
+		}
+	} else {
+		if t.proxiedLock == nil {
+			t.proxiedLock = concurrency.NewSimpleMutex()
+		}
+		t.proxiedLock.Lock()
+	}
+	// At this point we are guaranteed to have grabbed t.proxiedLock.
 	t.proxiedSessions = append(t.proxiedSessions, s)
 	if len(t.proxiedSessions) == 1 {
 		t.proxiedChannels = make([]reflect.SelectCase, 1+3)
 		continueChan := make(chan struct{})
 		t.proxiedChannels[0] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(continueChan)}
-		t.proxiedChannels[1] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.send)}
-		t.proxiedChannels[2] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.stop)}
-		t.proxiedChannels[3] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.detach)}
+		t.proxiedChannels[EventSend] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.send)}
+		t.proxiedChannels[EventStop] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.stop)}
+		t.proxiedChannels[EventDetach] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.detach)}
 		go t.clusterWriteLoop()
 	} else {
 		t.proxiedChannels = append(t.proxiedChannels, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.send)})
 		t.proxiedChannels = append(t.proxiedChannels, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.stop)})
 		t.proxiedChannels = append(t.proxiedChannels, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(s.detach)})
-		// Send an interrupt signal to clusterWriteLoop. New session added.
-		t.proxiedChannels[0].Chan.Interface().(chan struct{}) <- struct{}{}
 	}
+	t.proxiedLock.Unlock()
 }
 
 // Removes a multiplex proxied session from the topic's clusterWriteLoop.
 func (t *Topic) remProxiedSession(sess *Session) bool {
+	interruptChan := t.proxiedChannels[0].Chan.Interface().(chan struct{})
+	for !t.proxiedLock.TryLock() {
+		interruptChan <- struct{}{}
+	}
+	defer func() { t.proxiedLock.Unlock() }()
 	for i, s := range t.proxiedSessions {
 		if sess == s {
-			interruptChan := t.proxiedChannels[0].Chan.Interface().(chan struct{})
 			if len(t.proxiedSessions) == 1 {
 				t.proxiedSessions = nil
 				t.proxiedChannels = nil
@@ -3382,8 +3410,11 @@ func (t *Topic) remProxiedSession(sess *Session) bool {
 				}
 				numChans := len(t.proxiedChannels) - 3
 				t.proxiedChannels = t.proxiedChannels[:numChans]
+				if len(t.proxiedSessions)*3+1 != len(t.proxiedChannels) {
+					log.Panicf("topic[%s]: #proxied sessions (%d) vs #proxied channels mismatch (%d)",
+						t.name, len(t.proxiedSessions), len(t.proxiedChannels))
+				}
 			}
-			interruptChan <- struct{}{}
 			return true
 		}
 	}
@@ -3456,6 +3487,9 @@ func (t *Topic) remSession(sess *Session, asUid types.Uid) (*perSessionData, boo
 			t.sessions[s] = pssd
 			if len(pssd.muids) == 0 {
 				delete(t.sessions, s)
+				if s.isMultiplex() && !t.remProxiedSession(s) {
+					log.Printf("topic[%s]: multiplex session %s not removed from the event loop: no more attached uids", t.name, s.sid)
+				}
 				return &pssd, true
 			} else {
 				return &pssd, false

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tinode/chat/server/auth"
-	"github.com/tinode/chat/server/db"
+	adapter "github.com/tinode/chat/server/db"
 	"github.com/tinode/chat/server/media"
 	"github.com/tinode/chat/server/store/types"
 	"github.com/tinode/chat/server/validate"
@@ -230,6 +230,7 @@ func (UsersObjMapper) Create(user *types.User, private interface{}) (*types.User
 			ObjHeader: types.ObjHeader{CreatedAt: user.CreatedAt},
 			User:      user.Id,
 			Topic:     user.Uid().UserId(),
+			CreatedAt: user.CreatedAt,
 			ModeWant:  types.ModeCSelf,
 			ModeGiven: types.ModeCSelf,
 			Private:   private,
@@ -238,6 +239,7 @@ func (UsersObjMapper) Create(user *types.User, private interface{}) (*types.User
 			ObjHeader: types.ObjHeader{CreatedAt: user.CreatedAt},
 			User:      user.Id,
 			Topic:     user.Uid().FndName(),
+			CreatedAt: user.CreatedAt,
 			ModeWant:  types.ModeCSelf,
 			ModeGiven: types.ModeCSelf,
 			Private:   nil,
@@ -439,6 +441,7 @@ func (TopicsObjMapper) Create(topic *types.Topic, owner types.Uid, private inter
 			ObjHeader: types.ObjHeader{CreatedAt: topic.CreatedAt},
 			User:      owner.String(),
 			Topic:     topic.Id,
+			CreatedAt: topic.CreatedAt,
 			ModeGiven: types.ModeCFull,
 			ModeWant:  topic.GetAccess(owner),
 			Private:   private})
