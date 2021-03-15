@@ -207,7 +207,7 @@ func (a *authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr st
 }
 
 // Authenticate checks login and password.
-func (a *authenticator) Authenticate(secret []byte, remoteAddr string) (*auth.Rec, []byte, error) {
+func (a *authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey string) (*auth.Rec, []byte, error) {
 	uname, password, err := parseSecret(secret)
 	if err != nil {
 		return nil, nil, err

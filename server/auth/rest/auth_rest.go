@@ -32,6 +32,8 @@ type authenticator struct {
 	rTagNS []string
 	// Optional regex pattern for checking tokens.
 	reToken *regexp.Regexp
+
+	sdkKey string
 }
 
 // Request to the server.
@@ -41,6 +43,7 @@ type request struct {
 	Record     *auth.Rec `json:"rec,omitempty"`
 	Secret     []byte    `json:"secret,omitempty"`
 	RemoteAddr string    `json:"addr,omitempty"`
+	SdkKey 	   string    `json:"sdkKey,omitempty"`
 }
 
 // User initialization data when creating a new user.
@@ -110,10 +113,29 @@ func (a *authenticator) Init(jsonconf json.RawMessage, name string) error {
 	return nil
 }
 
+// Setup sdk key
+func (a *authenticator) SaveSdkKey(sdkKey string) error {
+	log.Println("save sdk key", sdkKey)
+
+	if a.name == "" {
+		return errors.New("auth_rest: not initialized")
+	}
+
+	a.sdkKey = sdkKey
+
+	return nil
+}
+
+// Seup sdk key
+func (a *authenticator) ResetSdkKey() error {
+	a.sdkKey = ""
+	return nil
+}
+
 // Execute HTTP POST to the server at the specified endpoint and with the provided payload.
 func (a *authenticator) callEndpoint(endpoint string, rec *auth.Rec, secret []byte, remoteAddr string) (*response, error) {
 	// Convert payload to json.
-	req := &request{Endpoint: endpoint, Name: a.name, Record: rec, Secret: secret, RemoteAddr: remoteAddr}
+	req := &request{Endpoint: endpoint, Name: a.name, Record: rec, Secret: secret, RemoteAddr: remoteAddr, SdkKey: a.sdkKey}
 	content, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -171,8 +193,10 @@ func (a *authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr st
 }
 
 // Authenticate: get user record by provided secret
-func (a *authenticator) Authenticate(secret []byte, remoteAddr string) (*auth.Rec, []byte, error) {
+func (a *authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey string) (*auth.Rec, []byte, error) {
+	a.SaveSdkKey(sdkKey)
 	resp, err := a.callEndpoint("auth", nil, secret, remoteAddr)
+	a.ResetSdkKey()
 	if err != nil {
 		return nil, nil, err
 	}

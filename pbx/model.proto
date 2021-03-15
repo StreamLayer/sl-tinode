@@ -176,11 +176,13 @@ message ClientAcc {
 message ClientLogin  {
 	string id = 1;
 	// Authentication scheme
-	string scheme  = 2;
+	string scheme = 2;
 	// Shared secret
 	bytes secret = 3;
 	// Credentials for verification.
 	repeated ClientCred cred = 4;
+	// Organization sdk key
+	string sdkKey = 5;
 }
 
 // Subscription request {sub} message
