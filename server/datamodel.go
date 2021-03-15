@@ -143,6 +143,8 @@ type MsgClientAcc struct {
 	Desc *MsgSetDesc `json:"desc,omitempty"`
 	// Credentials to verify (email or phone or captcha)
 	Cred []MsgCredClient `json:"cred,omitempty"`
+	// The initial authentication scheme the account can use
+	SdkKey string `json:"sdkKey,omitempty"`
 }
 
 // MsgClientLogin is a login {login} message.
@@ -155,6 +157,8 @@ type MsgClientLogin struct {
 	Secret []byte `json:"secret"`
 	// Credntials being verified (email or phone or captcha etc.)
 	Cred []MsgCredClient `json:"cred,omitempty"`
+	// Organization sdk key
+	SdkKey string `json:"sdkKey,omitempty"`
 }
 
 // MsgClientSub is a subscription request {sub} message.

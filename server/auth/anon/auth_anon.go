@@ -35,7 +35,7 @@ func (authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr strin
 }
 
 // Authenticate is not supported. This authenticator is used only at account creation time.
-func (authenticator) Authenticate(secret []byte, remoteAddr string) (*auth.Rec, []byte, error) {
+func (authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey string) (*auth.Rec, []byte, error) {
 	return nil, nil, types.ErrUnsupported
 }
 

@@ -246,7 +246,7 @@ type AuthHandler interface {
 	// additional validation. The stock authenticators don't use it.
 	// store.Users.GetAuthRecord("scheme", "unique")
 	// Returns: user auth record, challenge, error.
-	Authenticate(secret []byte, remoteAddr string) (*Rec, []byte, error)
+	Authenticate(secret []byte, remoteAddr string, sdkKey string) (*Rec, []byte, error)
 
 	// AsTag converts search token into prefixed tag or an empty string if it
 	// cannot be represented as a prefixed tag.

@@ -23,5 +23,6 @@ require (
 	golang.org/x/text v0.3.3
 	google.golang.org/api v0.20.0
 	google.golang.org/grpc v1.28.0
+	google.golang.org/protobuf v1.23.0
 	gopkg.in/rethinkdb/rethinkdb-go.v6 v6.2.1
 )

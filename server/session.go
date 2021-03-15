@@ -794,7 +794,7 @@ func (s *Session) acc(msg *ClientComMessage) {
 		}
 
 		var err error
-		rec, _, err = store.GetLogicalAuthHandler("token").Authenticate(msg.Acc.Token, s.remoteAddr)
+		rec, _, err = store.GetLogicalAuthHandler("token").Authenticate(msg.Acc.Token, s.remoteAddr, msg.Acc.SdkKey)
 		if err != nil {
 			s.queueOut(decodeStoreError(err, msg.Acc.Id, "", msg.Timestamp,
 				map[string]interface{}{"what": "auth"}))
@@ -839,7 +839,7 @@ func (s *Session) login(msg *ClientComMessage) {
 		return
 	}
 
-	rec, challenge, err := handler.Authenticate(msg.Login.Secret, s.remoteAddr)
+	rec, challenge, err := handler.Authenticate(msg.Login.Secret, s.remoteAddr, msg.Login.SdkKey)
 	if err != nil {
 		resp := decodeStoreError(err, msg.Id, "", msg.Timestamp, nil)
 		if resp.Ctrl.Code >= 500 {
