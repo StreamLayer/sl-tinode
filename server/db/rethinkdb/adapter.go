@@ -1083,7 +1083,7 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 			}
 		}
 
-		q = q.Between(from, to, rdb.BetweenOpts{Index: "user_createdAt"})
+		q = q.Between(from, to, rdb.BetweenOpts{Index: "user_createdAt", LeftBound: "closed", RightBound: "closed"})
 
 		if opts.Order == "desc" {
 			q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Desc("user_createdAt")})
