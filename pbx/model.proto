@@ -182,7 +182,7 @@ message ClientLogin  {
 	// Credentials for verification.
 	repeated ClientCred cred = 4;
 	// Organization sdk key
-	string sdkKey = 5;
+	string sdk_key = 5;
 }
 
 // Subscription request {sub} message
