@@ -196,7 +196,6 @@ func (a *authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr st
 func (a *authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey string) (*auth.Rec, []byte, error) {
 	a.SaveSdkKey(sdkKey)
 	resp, err := a.callEndpoint("auth", nil, secret, remoteAddr)
-	a.ResetSdkKey()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -236,6 +235,7 @@ func (a *authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey st
 		}
 	}
 
+	a.ResetSdkKey()
 	return resp.Record, resp.ByteVal, nil
 }
 
