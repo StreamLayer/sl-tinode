@@ -263,9 +263,9 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 			if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && wpNotified != true {
 				organizationId := ""
 				for session := range t.sessions {
-					log.Printf("session[%s]: %s - %s", session.uid.String(), ownerId, session.OrganizationId)
+					log.Printf("session[%s]: %s - %s", session.uid.UserId(), ownerId, session.OrganizationId)
 
-					if organizationId != "" && session.uid.String() == ownerId {
+					if organizationId != "" && session.uid.UserId() == ownerId {
 						organizationId = session.OrganizationId
 					}
 				}
