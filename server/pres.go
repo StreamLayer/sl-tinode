@@ -262,10 +262,9 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 			// if notify available, send push to user friends
 			if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && wpNotified != true {
 				organizationId := ""
+				// search owner session to resolve organization id
 				for session := range t.sessions {
-					log.Printf("session[%s]: %s - %s", session.uid.UserId(), ownerId, session.OrganizationId)
-
-					if organizationId != "" && session.uid.UserId() == ownerId {
+					if organizationId == "" && session.uid.UserId() == ownerId {
 						organizationId = session.OrganizationId
 					}
 				}
