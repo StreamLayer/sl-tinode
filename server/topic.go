@@ -771,7 +771,7 @@ func (t *Topic) sendImmediateSubNotifications(asUid types.Uid, acs *MsgAccessMod
 			t.presSingleUserOffline(uid2, mode2, status, nilPresParams, "", false)
 
 			// Also send a push notification to the other user.
-			if pushRcpt := t.pushForSub(asUid, uid2, pud2.modeWant, pud2.modeGiven, types.TimeNow()); pushRcpt != nil {
+			if pushRcpt := t.pushForSub(asUid, uid2, pud2.modeWant, pud2.modeGiven, types.TimeNow(), sreg.sess.OrganizationId); pushRcpt != nil {
 				usersPush(pushRcpt)
 			}
 		}
@@ -895,7 +895,7 @@ func (t *Topic) handleBroadcast(msg *ServerComMessage) {
 		}
 
 		if !t.isProxy {
-			pushRcpt = t.pushForData(asUser, msg.Data)
+			pushRcpt = t.pushForData(asUser, msg.Data, msg.sess.OrganizationId)
 
 			// Message sent: notify offline 'R' subscrbers on 'me'.
 			t.presSubsOffline("msg", &presParams{seqID: t.lastID, actor: msg.Data.From},
@@ -1639,7 +1639,7 @@ func (t *Topic) anotherUserSub(h *Hub, sess *Session, asUid, target types.Uid,
 		usersRegisterUser(target, true)
 
 		// Send push notification for the new subscription.
-		if pushRcpt := t.pushForSub(asUid, target, userData.modeWant, userData.modeGiven, now); pushRcpt != nil {
+		if pushRcpt := t.pushForSub(asUid, target, userData.modeWant, userData.modeGiven, now, sess.OrganizationId); pushRcpt != nil {
 			// TODO: maybe skip user's devices which were online when this event has happened.
 			usersPush(pushRcpt)
 		}
@@ -3081,7 +3081,7 @@ func (t *Topic) notifySubChange(uid, actor types.Uid, isChan bool,
 }
 
 // Prepares a payload to be delivered to a mobile device as a push notification in response to a {data} message.
-func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receipt {
+func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData, organizationId string) *push.Receipt {
 	// The `Topic` in the push receipt is `t.xoriginal` for group topics, `fromUid` for p2p topics,
 	// not the t.original(fromUid) because it's the topic name as seen by the recipient, not by the sender.
 	topic := t.xoriginal
@@ -3092,7 +3092,8 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receip
 	// Initialize the push receipt.
 	contentType, _ := data.Head["mime"].(string)
 	receipt := push.Receipt{
-		To: make(map[types.Uid]push.Recipient, t.subsCount()),
+		To:             make(map[types.Uid]push.Recipient, t.subsCount()),
+		OrganizationId: organizationId,
 		Payload: push.Payload{
 			What:        push.ActMsg,
 			Silent:      false,
@@ -3129,7 +3130,7 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receip
 }
 
 // Prepares payload to be delivered to a mobile device as a push notification in response to a new subscription.
-func (t *Topic) pushForSub(fromUid, toUid types.Uid, want, given types.AccessMode, now time.Time) *push.Receipt {
+func (t *Topic) pushForSub(fromUid, toUid types.Uid, want, given types.AccessMode, now time.Time, organizationId string) *push.Receipt {
 	// The `Topic` in the push receipt is `t.xoriginal` for group topics, `fromUid` for p2p topics,
 	// not the t.original(fromUid) because it's the topic name as seen by the recipient, not by the sender.
 	topic := t.xoriginal
@@ -3139,7 +3140,8 @@ func (t *Topic) pushForSub(fromUid, toUid types.Uid, want, given types.AccessMod
 
 	// Initialize the push receipt.
 	receipt := push.Receipt{
-		To: make(map[types.Uid]push.Recipient, t.subsCount()),
+		To:             make(map[types.Uid]push.Recipient, t.subsCount()),
+		OrganizationId: organizationId,
 		Payload: push.Payload{
 			What:      push.ActSub,
 			Silent:    false,

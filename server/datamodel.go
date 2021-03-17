@@ -339,6 +339,8 @@ type ClientComMessage struct {
 	MetaWhat int `json:"-"`
 	// Timestamp when this message was received by the server.
 	Timestamp time.Time `json:"-"`
+
+	OrganizationId string `json:"-"`
 }
 
 /////////////////////////////////////////////////////////////

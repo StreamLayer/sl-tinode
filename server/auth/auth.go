@@ -224,6 +224,8 @@ type Rec struct {
 	DefAcs  *types.DefaultAccess `json:"defacs,omitempty"`
 	Public  interface{}          `json:"public,omitempty"`
 	Private interface{}          `json:"private,omitempty"`
+
+	OrganizationId string `json:"organizationId,omitempty"`
 }
 
 // AuthHandler is the interface which auth providers must implement.

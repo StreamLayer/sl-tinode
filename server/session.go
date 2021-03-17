@@ -161,6 +161,8 @@ type Session struct {
 
 	// Type of proxy to master request being handled.
 	proxyReq ProxyReqType
+
+	OrganizationId string
 }
 
 // Subscription is a mapper of sessions to topics.
@@ -397,6 +399,10 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 	now := types.TimeNow()
 	atomic.StoreInt64(&s.lastAction, now.UnixNano())
 	msg.Timestamp = now
+
+	if s.OrganizationId != "" {
+		msg.OrganizationId = s.OrganizationId
+	}
 
 	if msg.AsUser == "" {
 		msg.AsUser = s.uid.UserId()
@@ -976,6 +982,9 @@ func (s *Session) onLogin(msgID string, timestamp time.Time, rec *auth.Rec, miss
 			}
 		}
 	}
+
+	s.OrganizationId = rec.OrganizationId
+	log.Println("OrganizationId", s.OrganizationId)
 
 	// GenSecret fails only if tokenLifetime is < 0. It can't be < 0 here,
 	// otherwise login would have failed earlier.

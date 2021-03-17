@@ -128,6 +128,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	data["recipients"] = recipients
 	data["sender"] = sender
 	data["topic"] = topic
+	data["organizationId"] = msg.OrganizationId
 	data["payload"] = messagePayload(&msg.Payload)
 	data["head"] = msg.Payload.Head
 	requestData, _ := json.Marshal(data)
