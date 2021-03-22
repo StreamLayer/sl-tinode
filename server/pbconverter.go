@@ -629,6 +629,10 @@ func pbSetQueryDeserialize(in *pbx.SetQuery) *MsgSetQuery {
 			msg.Tags = in.GetTags()
 		}
 
+		if msg == nil {
+			msg = &MsgSetQuery{}
+		}
+
 		msg.Cred = pbClientCredDeserialize(in.GetCred())
 	}
 
