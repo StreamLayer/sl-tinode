@@ -161,6 +161,8 @@ type Session struct {
 
 	// Type of proxy to master request being handled.
 	proxyReq ProxyReqType
+
+	OrganizationId string
 }
 
 // Subscription is a mapper of sessions to topics.
@@ -397,6 +399,10 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 	now := types.TimeNow()
 	atomic.StoreInt64(&s.lastAction, now.UnixNano())
 	msg.Timestamp = now
+
+	if s.OrganizationId != "" {
+		msg.OrganizationId = s.OrganizationId
+	}
 
 	if msg.AsUser == "" {
 		msg.AsUser = s.uid.UserId()
@@ -794,7 +800,7 @@ func (s *Session) acc(msg *ClientComMessage) {
 		}
 
 		var err error
-		rec, _, err = store.GetLogicalAuthHandler("token").Authenticate(msg.Acc.Token, s.remoteAddr)
+		rec, _, err = store.GetLogicalAuthHandler("token").Authenticate(msg.Acc.Token, s.remoteAddr, msg.Acc.SdkKey)
 		if err != nil {
 			s.queueOut(decodeStoreError(err, msg.Acc.Id, "", msg.Timestamp,
 				map[string]interface{}{"what": "auth"}))
@@ -839,7 +845,7 @@ func (s *Session) login(msg *ClientComMessage) {
 		return
 	}
 
-	rec, challenge, err := handler.Authenticate(msg.Login.Secret, s.remoteAddr)
+	rec, challenge, err := handler.Authenticate(msg.Login.Secret, s.remoteAddr, msg.Login.SdkKey)
 	if err != nil {
 		resp := decodeStoreError(err, msg.Id, "", msg.Timestamp, nil)
 		if resp.Ctrl.Code >= 500 {
@@ -976,6 +982,9 @@ func (s *Session) onLogin(msgID string, timestamp time.Time, rec *auth.Rec, miss
 			}
 		}
 	}
+
+	s.OrganizationId = rec.OrganizationId
+	log.Println("OrganizationId", s.OrganizationId)
 
 	// GenSecret fails only if tokenLifetime is < 0. It can't be < 0 here,
 	// otherwise login would have failed earlier.

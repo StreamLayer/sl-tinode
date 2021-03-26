@@ -91,7 +91,7 @@ func messagePayload(payload *push.Payload) map[string]string {
 }
 
 func sendPushToHttp(msg *push.Receipt, url string) {
-	log.Print("Prepare to sent HTTP push from: ", msg.Payload.From)
+	log.Println("Prepare to sent HTTP push from: ", msg.Payload.From)
 
 	recipientsIds := make([]t.Uid, len(msg.To))
 	for recipientId := range msg.To {
@@ -102,9 +102,9 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	* Sender user data
 	 */
 	sender, _ := store.Users.Get(t.ParseUserId(msg.Payload.From))
-	log.Print("notification topic id: ", msg.Payload.Topic)
+	log.Println("notification topic id: ", msg.Payload.Topic)
 	topic, _ := store.Topics.Get(msg.Payload.Topic)
-	log.Print("notification topic: ", topic)
+	log.Println("notification topic: ", topic)
 
 	/*
 	* Recipients list with user data, and conversation status
@@ -128,6 +128,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	data["recipients"] = recipients
 	data["sender"] = sender
 	data["topic"] = topic
+	data["organizationId"] = msg.OrganizationId
 	data["payload"] = messagePayload(&msg.Payload)
 	data["head"] = msg.Payload.Head
 	requestData, _ := json.Marshal(data)
@@ -135,10 +136,10 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	/*
 	* Send push through http
 	 */
-	log.Print("Sent HTTP push from: ", sender.Id, "to: ", recipientsIds)
+	log.Println("Sent HTTP push from: ", sender.Id, "to: ", recipientsIds)
 	_, err := http.Post(url, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
-		log.Fatal("Http send push failed: ", err)
+		log.Println("Http send push failed: ", err)
 	}
 }
 

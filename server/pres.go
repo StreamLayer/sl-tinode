@@ -261,10 +261,19 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 
 			// if notify available, send push to user friends
 			if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && wpNotified != true {
+				organizationId := ""
+				// search owner session to resolve organization id
+				for session := range t.sessions {
+					if organizationId == "" && session.uid.UserId() == ownerId {
+						organizationId = session.OrganizationId
+					}
+				}
+
 				for userId := range t.perSubs {
 					if types.GetTopicCat(userId) == types.TopicCatMe && userId != ownerId {
 						receipt := push.Receipt{
-							To: make(map[types.Uid]push.Recipient, t.subsCount()),
+							To:             make(map[types.Uid]push.Recipient, t.subsCount()),
+							OrganizationId: organizationId,
 							Payload: push.Payload{
 								What:      push.ActMsg,
 								Silent:    false,

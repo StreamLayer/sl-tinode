@@ -240,7 +240,8 @@ func pbCliSerialize(msg *ClientComMessage) *pbx.ClientMsg {
 			Id:     msg.Login.Id,
 			Scheme: msg.Login.Scheme,
 			Secret: msg.Login.Secret,
-			Cred:   pbClientCredsSerialize(msg.Login.Cred)}}
+			Cred:   pbClientCredsSerialize(msg.Login.Cred),
+			SdkKey: msg.Login.SdkKey}}
 	case msg.Sub != nil:
 		pkt.Message = &pbx.ClientMsg_Sub{Sub: &pbx.ClientSub{
 			Id:       msg.Sub.Id,
@@ -339,6 +340,7 @@ func pbCliDeserialize(pkt *pbx.ClientMsg) *ClientComMessage {
 			Scheme: login.GetScheme(),
 			Secret: login.GetSecret(),
 			Cred:   pbClientCredsDeserialize(login.GetCred()),
+			SdkKey: login.GetSdkKey(),
 		}
 	} else if sub := pkt.GetSub(); sub != nil {
 		msg.Sub = &MsgClientSub{
@@ -625,6 +627,10 @@ func pbSetQueryDeserialize(in *pbx.SetQuery) *MsgSetQuery {
 				msg = &MsgSetQuery{}
 			}
 			msg.Tags = in.GetTags()
+		}
+
+		if msg == nil {
+			msg = &MsgSetQuery{}
 		}
 
 		msg.Cred = pbClientCredDeserialize(in.GetCred())

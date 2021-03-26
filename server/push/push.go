@@ -34,7 +34,8 @@ type Receipt struct {
 	// Push topic for group notifications.
 	Channel string `json:"channel"`
 	// Actual content to be delivered to the client.
-	Payload Payload `json:"payload"`
+	Payload        Payload `json:"payload"`
+	OrganizationId string  `json:"organizationId"`
 }
 
 // ChannelReq is a request to subscribe/unsubscribe device IDs to channel (FCM topic).

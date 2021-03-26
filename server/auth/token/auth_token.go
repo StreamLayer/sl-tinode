@@ -83,7 +83,7 @@ func (authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr strin
 }
 
 // Authenticate checks validity of provided token.
-func (ta *authenticator) Authenticate(token []byte, remoteAddr string) (*auth.Rec, []byte, error) {
+func (ta *authenticator) Authenticate(token []byte, remoteAddr string, sdkKey string) (*auth.Rec, []byte, error) {
 	var tl tokenLayout
 	dataSize := binary.Size(&tl)
 	if len(token) < dataSize+sha256.Size {
