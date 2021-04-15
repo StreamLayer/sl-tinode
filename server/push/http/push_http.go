@@ -92,6 +92,8 @@ func messagePayload(payload *push.Payload) map[string]string {
 
 func sendPushToHttp(msg *push.Receipt, url string) {
 	log.Println("Prepare to sent HTTP push from: ", msg.Payload.From)
+	msgM, _ := json.Marshal(msg)
+	log.Println("Push Message", string(msgM))
 
 	recipientsIds := make([]t.Uid, len(msg.To))
 	for recipientId := range msg.To {
