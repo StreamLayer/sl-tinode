@@ -253,44 +253,47 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 
 			// get topic data, to check notified flag
 			topic, _ := store.Topics.Get(topicId)
-			topicData := reflect.ValueOf(topic.Public).Interface().(map[string]interface{})
-			wpNotified := false
-			if topicData["wpNotified"] != nil {
-				wpNotified = topicData["wpNotified"].(bool)
-			}
 
-			// if notify available, send push to user friends
-			if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && wpNotified != true {
-				organizationId := ""
-				// search owner session to resolve organization id
-				for session := range t.sessions {
-					if organizationId == "" && session.uid.UserId() == ownerId {
-						organizationId = session.OrganizationId
-					}
+			if topic != nil {
+				topicData := reflect.ValueOf(topic.Public).Interface().(map[string]interface{})
+				wpNotified := false
+				if topicData["wpNotified"] != nil {
+					wpNotified = topicData["wpNotified"].(bool)
 				}
 
-				for userId := range t.perSubs {
-					if types.GetTopicCat(userId) == types.TopicCatMe && userId != ownerId {
-						receipt := push.Receipt{
-							To:             make(map[types.Uid]push.Recipient, t.subsCount()),
-							OrganizationId: organizationId,
-							Payload: push.Payload{
-								What:      push.ActMsg,
-								Silent:    false,
-								Topic:     topicId,
-								From:      ownerId,
-								Timestamp: types.TimeNow(),
-								SeqId:     t.lastID,
-								Content:   string(match)}}
-
-						receipt.To[types.ParseUserId(userId)] = push.Recipient{}
-						usersPush(&receipt)
+				// if notify available, send push to user friends
+				if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && wpNotified != true {
+					organizationId := ""
+					// search owner session to resolve organization id
+					for session := range t.sessions {
+						if organizationId == "" && session.uid.UserId() == ownerId {
+							organizationId = session.OrganizationId
+						}
 					}
-				}
 
-				// update topic public data, set notified flag to omit spam
-				topicData["wpNotified"] = true
-				store.Topics.Update(topicId, map[string]interface{}{"Public": topicData})
+					for userId := range t.perSubs {
+						if types.GetTopicCat(userId) == types.TopicCatMe && userId != ownerId {
+							receipt := push.Receipt{
+								To:             make(map[types.Uid]push.Recipient, t.subsCount()),
+								OrganizationId: organizationId,
+								Payload: push.Payload{
+									What:      push.ActMsg,
+									Silent:    false,
+									Topic:     topicId,
+									From:      ownerId,
+									Timestamp: types.TimeNow(),
+									SeqId:     t.lastID,
+									Content:   string(match)}}
+
+							receipt.To[types.ParseUserId(userId)] = push.Recipient{}
+							usersPush(&receipt)
+						}
+					}
+
+					// update topic public data, set notified flag to omit spam
+					topicData["wpNotified"] = true
+					store.Topics.Update(topicId, map[string]interface{}{"Public": topicData})
+				}
 			}
 		}
 	}

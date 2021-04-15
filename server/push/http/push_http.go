@@ -81,6 +81,7 @@ func (httpPush) Init(jsonconf string) error {
 func messagePayload(payload *push.Payload) map[string]string {
 	data := make(map[string]string)
 	data["topic"] = payload.Topic
+	data["silent"] = strconv.FormatBool(payload.Silent)
 	data["from"] = payload.From
 	data["ts"] = payload.Timestamp.Format(time.RFC3339)
 	data["seq"] = strconv.Itoa(payload.SeqId)
@@ -133,6 +134,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	data["organizationId"] = msg.OrganizationId
 	data["payload"] = messagePayload(&msg.Payload)
 	data["head"] = msg.Payload.Head
+	data["what"] = msg.Payload.What
 	requestData, _ := json.Marshal(data)
 
 	/*
