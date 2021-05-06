@@ -3099,6 +3099,7 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData, organization
 			Silent:      false,
 			Topic:       topic,
 			From:        data.From,
+			Head:        data.Head,
 			Timestamp:   data.Timestamp,
 			SeqId:       data.SeqId,
 			ContentType: contentType,
