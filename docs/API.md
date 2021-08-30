@@ -66,7 +66,7 @@
 
 ## How it Works?
 
-Tinode is an IM router and a store. Conceptually it loosely follows a publish-subscribe model.
+Tinode is an IM router and a store. Conceptually it loosely follows a [publish-subscribe](https://en.wikipedia.org/wiki/Publish%E2%80%93subscribe_pattern) model.
 
 Server connects sessions, users, and topics. Session is a network connection between a client application and the server. User represents a human being who connects to the server with a session. Topic is a named communication channel which routes content between sessions.
 
@@ -202,7 +202,7 @@ Compiled-in authenticator names may be changed by using `logical_names` configur
 
 When a new account is created, the user must inform the server which authentication method will be later used to gain access to this account as well as provide shared secret, if appropriate. Only `basic` and `anonymous` can be used during account creation. The `basic` requires the user to generate and send a unique login and password to the server. The `anonymous` does not exchange secrets.
 
-User may optionally set `{acc login=true}` to use the new account for immediate authentication. When `login=false` (or not set), the new account is created but the authentication status of the session which created the account remains unchanged. When `login=true` the server will attempt to authenticate the session with the new account, the response to the `{acc}` request will contain the authentication token on success. This is particularly important for the `anonymous` authentication.
+User may optionally set `{acc login=true}` to use the new account for immediate authentication. When `login=false` (or not set), the new account is created but the authentication status of the session which created the account remains unchanged. When `login=true` the server will attempt to authenticate the session with the new account, the `{ctrl}` response to the `{acc}` request will contain the authentication token on success. This is particularly important for the `anonymous` authentication because that's the only time when the authentication token can be retrieved.
 
 #### Logging in
 
@@ -447,7 +447,7 @@ Topics and subscriptions have `public` and `private` fields. Generally, the fiel
 The format of the `public` field in group and peer to peer topics is expected to be a [vCard](https://en.wikipedia.org/wiki/VCard) although only `fn` and `photo` fields are currently used by client software:
 
 ```js
-vcard: {
+{
   fn: "John Doe", // string, formatted name
   n: {
     surname: "Miner", // last of family name
@@ -660,7 +660,8 @@ The `{acc}` message **cannot** be used to modify `desc` or `cred` of an existing
 ```js
 acc: {
   id: "1a2b3", // string, client-provided message id, optional
-  user: "new", // string, "new" to create a new user, default: current user, optional
+  user: "newABC123", // string, "new" optionally followed by any characters to create a new user,
+              // default: current user, optional
   token: "XMgS...8+BO0=", // string, authentication token to use for the request if the
                // session is not authenticated, optional
   status: "ok", // change user's status; no default value, optional.
@@ -700,8 +701,7 @@ acc: {
 }
 ```
 
-Server responds with a `{ctrl}` message with `params` containing details of the new user. If `desc.defacs` is missing,
-server will assign server-default access values.
+Server responds with a `{ctrl}` message with `params` containing details of the new user account such as user ID and, in case of `login: true`, authentication token. If `desc.defacs` is missing, the server will assign server-default access permissions to new account.
 
 The only supported authentication schemes for account creation are `basic` and `anonymous`.
 
@@ -736,7 +736,7 @@ The `{sub}` packet serves the following functions:
  * attaching session to a previously subscribed topic
  * fetching topic data
 
-User creates a new group topic by sending `{sub}` packet with the `topic` field set to `"new"`. Server will create a topic and respond back to session with the name of the newly created topic.
+User creates a new group topic by sending `{sub}` packet with the `topic` field set to `new12321` (regular topic) or `nch12321` (channel) where `12321` denotes any string including an empty string. Server will create a topic and respond back to the session with the name of the newly created topic.
 
 User creates a new peer to peer topic by sending `{sub}` packet with `topic` set to peer's user ID.
 
@@ -800,17 +800,16 @@ sub: {
       ims: "2015-10-06T18:07:30.038Z" // timestamp, "if modified since" - return
               // public and private values only if at least one of them has been
               // updated after the stated timestamp, optional
-
     },
 
     // Optional parameters for {get what="sub"}
     sub: {
       ims: "2015-10-06T18:07:30.038Z", // timestamp, "if modified since" - return
-              // public and private values only if at least one of them has been
-              // updated after the stated timestamp, optional
-    user: "usr2il9suCbuko", // string, return results for a single user,
+              // only those subscriptions which have been modified after the stated
+              // timestamp, optional
+      user: "usr2il9suCbuko", // string, return results for a single user,
                             // any topic other than 'me', optional
-    topic: "usr2il9suCbuko", // string, return results for a single topic,
+      topic: "usr2il9suCbuko", // string, return results for a single topic,
                             // 'me' topic only, optional
       limit: 20 // integer, limit the number of returned objects
     },
@@ -1116,7 +1115,7 @@ data: {
 }
 ```
 
-Data messages have a `seq` field which holds a sequential numeric ID generated by the server. The IDs are guaranteed to be unique within a topic. IDs start from 1 and sequentially increment with every successful `{pub}`](#pub) message received by the topic.
+Data messages have a `seq` field which holds a sequential numeric ID generated by the server. The IDs are guaranteed to be unique within a topic. IDs start from 1 and sequentially increment with every successful [`{pub}`](#pub) message received by the topic.
 
 See [Format of Content](#format-of-content) for `content` format considerations.
 

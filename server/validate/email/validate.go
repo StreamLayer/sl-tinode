@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	qp "mime/quotedprintable"
 	"net/mail"
@@ -21,6 +20,7 @@ import (
 	textt "text/template"
 	"time"
 
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	t "github.com/tinode/chat/server/store/types"
 	i18n "golang.org/x/text/language"
@@ -101,7 +101,7 @@ func resolveTemplatePath(path string) string {
 func readTemplateFile(pathTempl *textt.Template, lang string) (*textt.Template, string, error) {
 	buffer := bytes.Buffer{}
 	err := pathTempl.Execute(&buffer, map[string]interface{}{"Language": lang})
-	path := string(buffer.Bytes())
+	path := buffer.String()
 	if err != nil {
 		return nil, path, fmt.Errorf("reading %s: %w", path, err)
 	}
@@ -158,8 +158,7 @@ func executeTemplate(template *textt.Template, params map[string]interface{}) (*
 
 // Init: initialize validator.
 func (v *validator) Init(jsonconf string) error {
-	var err error
-	if err = json.Unmarshal([]byte(jsonconf), v); err != nil {
+	if err := json.Unmarshal([]byte(jsonconf), v); err != nil {
 		return err
 	}
 
@@ -169,7 +168,7 @@ func (v *validator) Init(jsonconf string) error {
 	}
 	v.senderEmail = sender.Address
 
-	// Check if login is provided explicitly. Otherwise parse Sender and use that as login for authentication.
+	// Enable auth if login is provided.
 	if v.Login != "" {
 		v.auth = smtp.PlainAuth("", v.Login, v.SenderPassword, v.SMTPAddr)
 	}
@@ -541,11 +540,12 @@ func (v *validator) send(to string, content *emailContent) error {
 
 		message.WriteString("\r\n--" + boundary + "--")
 	}
+
 	message.WriteString("\r\n")
 
 	err := v.sendMail([]string{to}, message.Bytes())
 	if err != nil {
-		log.Println("SMTP error", to, err)
+		logs.Warn.Println("SMTP error", to, err)
 	}
 
 	return err

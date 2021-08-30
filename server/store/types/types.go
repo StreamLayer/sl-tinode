@@ -62,7 +62,7 @@ const ZeroUid Uid = 0
 // NullValue is a Unicode DEL character which indicated that the value is being deleted.
 const NullValue = "\u2421"
 
-// Lengths of various Uid representations
+// Lengths of various Uid representations.
 const (
 	uidBase64Unpadded = 11
 	p2pBase64Unpadded = 22
@@ -157,14 +157,14 @@ func (uid Uid) String32() string {
 	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(data))
 }
 
-// ParseUid parses string NOT prefixed with anything
+// ParseUid parses string NOT prefixed with anything.
 func ParseUid(s string) Uid {
 	var uid Uid
 	uid.UnmarshalText([]byte(s))
 	return uid
 }
 
-// ParseUid32 parses base32-encoded string into Uid
+// ParseUid32 parses base32-encoded string into Uid.
 func ParseUid32(s string) Uid {
 	var uid Uid
 	if data, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(s); err == nil {
@@ -173,7 +173,7 @@ func ParseUid32(s string) Uid {
 	return uid
 }
 
-// UserId converts Uid to string prefixed with 'usr', like usrXXXXX
+// UserId converts Uid to string prefixed with 'usr', like usrXXXXX.
 func (uid Uid) UserId() string {
 	return uid.PrefixId("usr")
 }
@@ -191,7 +191,7 @@ func (uid Uid) PrefixId(prefix string) string {
 	return prefix + uid.String()
 }
 
-// ParseUserId parses user ID of the form "usrXXXXXX"
+// ParseUserId parses user ID of the form "usrXXXXXX".
 func ParseUserId(s string) Uid {
 	var uid Uid
 	if strings.HasPrefix(s, "usr") {
@@ -212,7 +212,15 @@ func GrpToChn(grp string) string {
 	return ""
 }
 
+// IsChannel checks if the given topic name is a reference to a channel.
+// The "nch" should not be considered a channel reference because it can only be used by the topic owner at the time of
+// group topic creation.
+func IsChannel(name string) bool {
+	return strings.HasPrefix(name, "chn")
+}
+
 // ChnToGrp gets group topic name from channel name.
+// If it's a non-channel group topic, the name is returned unchanged.
 func ChnToGrp(chn string) string {
 	if strings.HasPrefix(chn, "chn") {
 		return strings.Replace(chn, "chn", "grp", 1)
@@ -268,13 +276,13 @@ func (us *UidSlice) Rem(uid Uid) bool {
 	return true
 }
 
-// Contains checks if the UidSlice contains the given uid
+// Contains checks if the UidSlice contains the given UID.
 func (us UidSlice) Contains(uid Uid) bool {
 	_, contains := us.find(uid)
 	return contains
 }
 
-// P2PName takes two Uids and generates a P2P topic name
+// P2PName takes two Uids and generates a P2P topic name.
 func (uid Uid) P2PName(u2 Uid) string {
 	if !uid.IsZero() && !u2.IsZero() {
 		b1, _ := uid.MarshalBinary()
@@ -555,8 +563,8 @@ func (m AccessMode) MarshalText() ([]byte, error) {
 		return nil, errors.New("AccessMode invalid")
 	}
 
-	var res = []byte{}
-	var modes = []byte{'J', 'R', 'W', 'P', 'A', 'S', 'D', 'O'}
+	res := []byte{}
+	modes := []byte{'J', 'R', 'W', 'P', 'A', 'S', 'D', 'O'}
 	for i, chr := range modes {
 		if (m & (1 << uint(i))) != 0 {
 			res = append(res, chr)
@@ -589,6 +597,9 @@ Loop:
 		case 'O', 'o':
 			m0 |= ModeOwner
 		case 'N', 'n':
+			if m0 != ModeUnset {
+				return ModeUnset, errors.New("AccessMode: access N cannot be combined with any other")
+			}
 			m0 = ModeNone // N means explicitly no access, all bits cleared
 			break Loop
 		default:
@@ -673,9 +684,8 @@ func (grant AccessMode) BetterEqual(want AccessMode) bool {
 // Zero delta is an empty string ""
 func (o AccessMode) Delta(n AccessMode) string {
 	// Removed bits, bits present in 'old' but missing in 'new' -> '-'
-	o2n := ModeBitmask & o &^ n
 	var removed string
-	if o2n > 0 {
+	if o2n := ModeBitmask & o &^ n; o2n > 0 {
 		removed = o2n.String()
 		if removed != "" {
 			removed = "-" + removed
@@ -683,9 +693,8 @@ func (o AccessMode) Delta(n AccessMode) string {
 	}
 
 	// Added bits, bits present in 'n' but missing in 'o' -> '+'
-	n2o := ModeBitmask & n &^ o
 	var added string
-	if n2o > 0 {
+	if n2o := ModeBitmask & n &^ o; n2o > 0 {
 		added = n2o.String()
 		if added != "" {
 			added = "+" + added
@@ -843,6 +852,14 @@ type Credential struct {
 	Retries int
 }
 
+// LastSeenUA is a timestamp and a user agent of when the user was last seen.
+type LastSeenUA struct {
+	// When is the timestamp when the user was last online.
+	When time.Time
+	// UserAgent is the client UA of the last online access.
+	UserAgent string
+}
+
 // Subscription to a topic
 type Subscription struct {
 	ObjHeader `bson:",inline"`
@@ -877,10 +894,8 @@ type Subscription struct {
 	seqId int
 	// Deserialized TouchedAt from topic
 	touchedAt time.Time
-	// timestamp when the user was last online
-	lastSeen time.Time
-	// user agent string of the last online access
-	userAgent string
+	// Timestamp & user agent of when the user was last online.
+	lastSeenUA *LastSeenUA
 
 	// P2P only. ID of the other user
 	with string
@@ -940,8 +955,11 @@ func (s *Subscription) SetSeqId(id int) {
 }
 
 // GetLastSeen returns lastSeen.
-func (s *Subscription) GetLastSeen() time.Time {
-	return s.lastSeen
+func (s *Subscription) GetLastSeen() *time.Time {
+	if s.lastSeenUA != nil {
+		return &s.lastSeenUA.When
+	}
+	return nil
 }
 
 // GetLastSeen returns lastSeen.
@@ -951,15 +969,22 @@ func (s *Subscription) GetCreatedAt() time.Time {
 
 // GetUserAgent returns userAgent.
 func (s *Subscription) GetUserAgent() string {
-	return s.userAgent
+	if s.lastSeenUA != nil {
+		return s.lastSeenUA.UserAgent
+	}
+	return ""
 }
 
 // SetLastSeenAndUA updates lastSeen time and userAgent.
 func (s *Subscription) SetLastSeenAndUA(when *time.Time, ua string) {
-	if when != nil {
-		s.lastSeen = *when
+	if when != nil && !when.IsZero() {
+		s.lastSeenUA = &LastSeenUA{
+			When:      *when,
+			UserAgent: ua,
+		}
+	} else {
+		s.lastSeenUA = nil
 	}
-	s.userAgent = ua
 }
 
 // SetDefaultAccess updates default access values.
@@ -1161,8 +1186,7 @@ func (rs RangeSorter) Less(i, j int) bool {
 // The ranges are expected to be sorted.
 // Ranges are inclusive-inclusive, i.e. [1..3] -> 1, 2, 3.
 func (rs RangeSorter) Normalize() RangeSorter {
-	ll := rs.Len()
-	if ll > 1 {
+	if ll := rs.Len(); ll > 1 {
 		prev := 0
 		for i := 1; i < ll; i++ {
 			if rs[prev].Low == rs[i].Low {

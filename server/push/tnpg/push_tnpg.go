@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/push"
 	"github.com/tinode/chat/server/push/fcm"
 	"github.com/tinode/chat/server/store"
@@ -40,11 +40,14 @@ type configType struct {
 	AuthToken string `json:"token"`
 }
 
-// subUnsubReq is a request to subscribe/unsubscribe device IDs to channel (FCM topic).
+// subUnsubReq is a request to subscribe/unsubscribe device ID(s) to channel(s) (FCM topic).
+// One device to multiple channels or multiple devices to one channel.
 type subUnsubReq struct {
-	Channel string   `json:"channel"`
-	Devices []string `json:"devices"`
-	Unsub   bool     `json:"unsub"`
+	Channel  string   `json:"channel,omitempty"`
+	Channels []string `json:"channels,omitempty"`
+	Device   string   `json:"device,omitempty"`
+	Devices  []string `json:"devices,omitempty"`
+	Unsub    bool     `json:"unsub"`
 }
 
 type tnpgResponse struct {
@@ -141,7 +144,7 @@ func postMessage(endpoint string, body interface{}, config *configType) (*batchR
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", endpoint, buf)
+	req, err := http.NewRequest(http.MethodPost, endpoint, buf)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +176,7 @@ func postMessage(endpoint string, body interface{}, config *configType) (*batchR
 
 	if err != nil {
 		// Just log the error, but don't report it to caller. The push succeeded.
-		log.Println("tnpg failed to decode response", err)
+		logs.Warn.Println("tnpg failed to decode response", err)
 	}
 
 	batch.httpCode = resp.StatusCode
@@ -197,15 +200,15 @@ func sendPushes(rcpt *push.Receipt, config *configType) {
 		}
 		resp, err := postMessage(handler.pushUrl, payloads, config)
 		if err != nil {
-			log.Println("tnpg push request failed:", err)
+			logs.Warn.Println("tnpg push request failed:", err)
 			break
 		}
 		if resp.httpCode >= 300 {
-			log.Println("tnpg push rejected:", resp.httpStatus)
+			logs.Warn.Println("tnpg push rejected:", resp.httpStatus)
 			break
 		}
 		if resp.FatalCode != "" {
-			log.Println("tnpg push failed:", resp.FatalMessage)
+			logs.Err.Println("tnpg push failed:", resp.FatalMessage)
 			break
 		}
 		// Check for expired tokens and other errors.
@@ -215,34 +218,42 @@ func sendPushes(rcpt *push.Receipt, config *configType) {
 
 func processSubscription(req *push.ChannelReq, config *configType) {
 	su := subUnsubReq{
-		Devices: fcm.DevicesForUser(req.Uid),
-		Channel: req.Channel,
-		Unsub:   req.Unsub,
+		Unsub: req.Unsub,
 	}
-	if len(su.Devices) == 0 {
+
+	if req.Channel != "" {
+		su.Devices = fcm.DevicesForUser(req.Uid)
+		su.Channel = req.Channel
+	} else if req.DeviceID != "" {
+		su.Channels = fcm.ChannelsForUser(req.Uid)
+		su.Device = req.DeviceID
+	}
+
+	if (len(su.Devices) == 0 && su.Device == "") || (len(su.Channels) == 0 && su.Channel == "") {
 		return
 	}
+
 	if len(su.Devices) > subBatchSize {
 		// It's extremely unlikely for a single user to have this many devices.
 		su.Devices = su.Devices[0:subBatchSize]
-		log.Println("tnpg: user", req.Uid.UserId(), "has more than", subBatchSize, "devices")
+		logs.Warn.Println("tnpg: user", req.Uid.UserId(), "has more than", subBatchSize, "devices")
 	}
 
 	resp, err := postMessage(handler.subUrl, &su, config)
 	if err != nil {
-		log.Println("tnpg channel sub request failed:", err)
+		logs.Warn.Println("tnpg channel sub request failed:", err)
 		return
 	}
 	if resp.httpCode >= 300 {
-		log.Println("tnpg channel sub rejected:", resp.httpStatus)
+		logs.Warn.Println("tnpg channel sub rejected:", resp.httpStatus)
 		return
 	}
 	if resp.FatalCode != "" {
-		log.Println("tnpg channel sub failed:", resp.FatalMessage)
+		logs.Err.Println("tnpg channel sub failed:", resp.FatalMessage)
 		return
 	}
 	// Check for expired tokens and other errors.
-	handleSubResponse(resp, req, su.Devices)
+	handleSubResponse(resp, req, su.Devices, su.Channels)
 }
 
 func handlePushResponse(batch *batchResponse, messages []fcm.MessageData) {
@@ -255,32 +266,38 @@ func handlePushResponse(batch *batchResponse, messages []fcm.MessageData) {
 		case "": // no error
 		case messageRateExceeded, quotaExceeded, serverUnavailable, unavailableError, internalError, unknownError:
 			// Transient errors. Stop sending this batch.
-			log.Println("tnpg: transient failure", resp.ErrorMessage)
+			logs.Warn.Println("tnpg: transient failure", resp.ErrorMessage)
 			return
 		case mismatchedCredential, invalidArgument, senderIDMismatch, thirdPartyAuthError, invalidAPNSCredentials:
 			// Config errors
-			log.Println("tnpg: invalid config", resp.ErrorMessage)
+			logs.Warn.Println("tnpg: invalid config", resp.ErrorMessage)
 			return
 		case registrationTokenNotRegistered, unregisteredError:
 			// Token is no longer valid.
-			log.Println("tnpg: invalid token", resp.ErrorMessage)
+			logs.Warn.Println("tnpg: invalid token", resp.ErrorMessage)
 			if err := store.Devices.Delete(messages[i].Uid, messages[i].DeviceId); err != nil {
-				log.Println("tnpg: failed to delete invalid token", err)
+				logs.Warn.Println("tnpg: failed to delete invalid token", err)
 			}
 		default:
-			log.Println("tnpg: unrecognized error", resp.ErrorMessage)
+			logs.Warn.Println("tnpg: unrecognized error", resp.ErrorMessage)
 		}
 	}
 }
 
-func handleSubResponse(batch *batchResponse, req *push.ChannelReq, devices []string) {
+func handleSubResponse(batch *batchResponse, req *push.ChannelReq, devices, channels []string) {
 	if batch.FailureCount <= 0 {
 		return
 	}
 
+	var src string
 	for _, resp := range batch.Responses {
+		if len(devices) > 0 {
+			src = devices[resp.Index]
+		} else {
+			src = channels[resp.Index]
+		}
 		// FCM documentation sucks. There is no list of possible errors so no action can be taken but logging.
-		log.Println("fcm sub/unsub error", resp.ErrorCode, req.Uid, devices[resp.Index])
+		logs.Warn.Println("fcm sub/unsub error", resp.ErrorCode, req.Uid, src)
 	}
 }
 
@@ -295,7 +312,7 @@ func (Handler) Push() chan<- *push.Receipt {
 	return handler.input
 }
 
-// Push returns a channel that the server will use to send messages to.
+// Channel returns a channel that the server will use to send group requests to.
 // If the adapter blocks, the message will be dropped.
 func (Handler) Channel() chan<- *push.ChannelReq {
 	return handler.channel

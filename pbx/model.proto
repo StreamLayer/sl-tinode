@@ -312,6 +312,10 @@ message TopicDesc {
 	bytes private = 11;
 	string state = 12;
 	int64 state_at = 13;
+
+	// P2P only: other user's last online timestamp & user agent
+	int64 last_seen_time = 15;
+	string last_seen_user_agent = 16;
 }
 
 // MsgTopicSub: topic subscription details, sent in Meta message
@@ -419,12 +423,13 @@ message ServerMeta {
 	repeated ServerCred cred = 7;
 }
 
-// {info} message: server-side copy of ClientNote with From added
+// {info} message: server-side copy of ClientNote with From and optional Src added.
 message ServerInfo {
 	string topic = 1;
 	string from_user_id = 2;
 	InfoNote what = 3;
 	int32 seq_id = 4;
+	string src = 5;
 }
 
 // Cumulative message

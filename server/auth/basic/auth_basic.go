@@ -105,6 +105,11 @@ func (a *authenticator) Init(jsonconf json.RawMessage, name string) error {
 	return nil
 }
 
+// IsInitialized returns true if the handler is initialized.
+func (a *authenticator) IsInitialized() bool {
+	return a.name != ""
+}
+
 // AddRecord adds a basic authentication record to DB.
 func (a *authenticator) AddRecord(rec *auth.Rec, secret []byte, remoteAddr string) (*auth.Rec, error) {
 	uname, password, err := parseSecret(secret)
@@ -197,6 +202,7 @@ func (a *authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr st
 		if tag == oldTag {
 			rec.Tags[i] = rec.Tags[len(rec.Tags)-1]
 			rec.Tags = rec.Tags[:len(rec.Tags)-1]
+
 			break
 		}
 	}

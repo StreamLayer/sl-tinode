@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/push"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -52,6 +53,8 @@ func (t *Topic) addToPerSubs(topic string, online, enabled bool) {
 		return
 	}
 
+	// TODO: maybe skip loading channel subscriptions. They can's send or receive these notifications anyway.
+
 	if uid1, uid2, err := types.ParseP2P(topic); err == nil {
 		// If this is a P2P topic, index it by second user's ID
 		if uid1.UserId() == t.name {
@@ -68,7 +71,7 @@ func (t *Topic) addToPerSubs(topic string, online, enabled bool) {
 // perSubs contains (a) topics that the user wants to notify of his presence and
 // (b) those which want to receive notifications from this user.
 func (t *Topic) loadContacts(uid types.Uid) error {
-	subs, err := store.Users.GetSubs(uid, nil)
+	subs, err := store.Users.GetSubs(uid)
 	if err != nil {
 		return err
 	}
@@ -83,7 +86,8 @@ func (t *Topic) loadContacts(uid types.Uid) error {
 // The originating topic reports its own status in 'what' as "on", "off", "gone" or "?unkn".
 // 	"on" - requester came online
 // 	"off" - requester is offline now
-//  "?none" - anchor for "+" command: requester status is unknown, won't generate a response and isn't forwarded to clients.
+//  "?none" - anchor for "+" command: requester status is unknown, won't generate a response
+// 			and isn't forwarded to clients.
 //  "gone" - topic deleted or otherwise gone - equivalent of "off+remove"
 //	"?unkn" - requester wants to initiate online status exchange but it's own status is unknown yet. This
 //  notifications is not forwarded to users.
@@ -93,13 +97,13 @@ func (t *Topic) loadContacts(uid types.Uid) error {
 // "+rem": terminate and remove the subscription (subscription deleted)
 // "+dis" disable subscription withot removing it, the opposite of "en".
 // The "+en/rem/dis" command itself is stripped from the notification.
-func (t *Topic) presProcReq(fromUserID, what string, wantReply bool) string {
+func (t *Topic) procPresReq(fromUserID, what string, wantReply bool) string {
 	if t.isInactive() {
 		return ""
 	}
 
 	if t.isProxy {
-		// Pass through on proxy: there is no point in maintaining peer status
+		// Passthrough on proxy: there is no point in maintaining peer status
 		// at the proxy, it's an exact replica of the master.
 		return what
 	}
@@ -143,10 +147,8 @@ func (t *Topic) presProcReq(fromUserID, what string, wantReply bool) string {
 	}
 
 	if t.cat == types.TopicCatMe {
-
 		// Find if the contact is listed.
 		if psd, ok := t.perSubs[fromUserID]; ok {
-
 			log.Printf("topic[%s]: cmd - %s, psd[%s] - %v", t.name, cmd, fromUserID, psd)
 
 			if cmd == "rem" {
@@ -156,9 +158,7 @@ func (t *Topic) presProcReq(fromUserID, what string, wantReply bool) string {
 					what = ""
 				}
 				delete(t.perSubs, fromUserID)
-
 			} else {
-
 				switch cmd {
 				case "":
 					// No change in being enabled or disabled and not being added or removed.
@@ -196,7 +196,6 @@ func (t *Topic) presProcReq(fromUserID, what string, wantReply bool) string {
 
 				t.perSubs[fromUserID] = psd
 			}
-
 		} else if cmd != "rem" {
 			// Got request from a new topic. This must be a new subscription. Record it.
 			// If it's unknown, recording it as offline.
@@ -206,7 +205,6 @@ func (t *Topic) presProcReq(fromUserID, what string, wantReply bool) string {
 				// If the connection is not enabled, ignore the update.
 				what = ""
 			}
-
 		} else {
 			// Not in list and asked to be removed from the list - ignore
 			what = ""
@@ -223,13 +221,35 @@ func (t *Topic) presProcReq(fromUserID, what string, wantReply bool) string {
 			// Topic is 'me' even for group topics; group topics will use 'me' as a signal to drop the message
 			// without forwarding to sessions
 			Pres:   &MsgServerPres{Topic: "me", What: replyAs, Src: t.name, WantReply: reqReply},
-			RcptTo: fromUserID}
+			RcptTo: fromUserID,
+		}
 	}
 
 	return what
 }
 
-// Publish user's update to his/her users of interest on their 'me' topic
+// Get user-specific topic name for notifying users of interest, or skip the notification.
+func notifyOnOrSkip(topic, what string, online bool) string {
+	// Don't send notifications on channels
+	if types.IsChannel(topic) {
+		return ""
+	}
+
+	// P2P contacts are notified on 'me', group topics are notified on proper topic name.
+	notifyOn := "me"
+	if what == "upd" || what == "ua" {
+		if !online {
+			// Skip "upd" and "ua" notifications if the contact is offline.
+			return ""
+		}
+		if types.GetTopicCat(topic) == types.TopicCatGrp {
+			notifyOn = topic
+		}
+	}
+	return notifyOn
+}
+
+// Publish user's update to his/her subscriptions: p2p on their 'me' topic, group topics on the topic.
 // Case A: user came online, "on", ua
 // Case B: user went offline, "off", ua
 // Case C: user agent change, "ua", ua
@@ -301,7 +321,8 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 	// Push update to subscriptions
 	for topic, psd := range t.perSubs {
 		// P2P contacts are notified on 'me', group topics are notified on proper topic name.
-		notifyOn := "me"
+		notifyOn := notifyOnOrSkip(topic, what, psd.online)
+
 		if what == "upd" || what == "ua" {
 			if !psd.online {
 				// Skip "upd" and "ua" notifications if the contact is offline.
@@ -316,14 +337,21 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 				notifyOn = topic
 			}
 		}
+
+		if notifyOn == "" {
+			continue
+		}
+
 		globals.hub.route <- &ServerComMessage{
 			Pres: &MsgServerPres{
 				Topic:     notifyOn,
 				What:      what,
 				Src:       t.name,
 				UserAgent: ua,
-				WantReply: wantReply},
-			RcptTo: topic}
+				WantReply: wantReply,
+			},
+			RcptTo: topic,
+		}
 
 		if psd.online && goOffline {
 			psd.online = false
@@ -333,13 +361,19 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 }
 
 // Publish user's update to his/her users of interest on their 'me' topic while user's 'me' topic is offline
-// Case A: user is being deleted, "gone"
+// Case A: user is being deleted, "gone".
 func presUsersOfInterestOffline(uid types.Uid, subs []types.Subscription, what string) {
 	// Push update to subscriptions
-	for _, sub := range subs {
+	for i := range subs {
+		notifyOn := notifyOnOrSkip(subs[i].Topic, what, true)
+		if notifyOn == "" {
+			continue
+		}
+
 		globals.hub.route <- &ServerComMessage{
-			Pres:   &MsgServerPres{Topic: "me", What: what, Src: uid.UserId(), WantReply: false},
-			RcptTo: sub.Topic}
+			Pres:   &MsgServerPres{Topic: notifyOn, What: what, Src: uid.UserId(), WantReply: false},
+			RcptTo: subs[i].Topic,
+		}
 	}
 }
 
@@ -354,7 +388,6 @@ func presUsersOfInterestOffline(uid types.Uid, subs []types.Subscription, what s
 // Case V.2: Messages soft deleted, "del" to one user only
 // Case W.2: Messages hard-deleted, "del"
 func (t *Topic) presSubsOnline(what, src string, params *presParams, filter *presFilters, skipSid string) {
-
 	// If affected user is the same as the user making the change, clear 'who'
 	actor := params.actor
 	target := params.target
@@ -367,12 +400,23 @@ func (t *Topic) presSubsOnline(what, src string, params *presParams, filter *pre
 	}
 
 	globals.hub.route <- &ServerComMessage{
-		Pres: &MsgServerPres{Topic: t.xoriginal, What: what, Src: src,
-			Acs: params.packAcs(), AcsActor: actor, AcsTarget: target,
-			SeqId: params.seqID, DelId: params.delID, DelSeq: params.delSeq,
-			FilterIn: int(filter.filterIn), FilterOut: int(filter.filterOut),
-			SingleUser: filter.singleUser, ExcludeUser: filter.excludeUser},
-		RcptTo: t.name, SkipSid: skipSid}
+		Pres: &MsgServerPres{
+			Topic:       t.xoriginal,
+			What:        what,
+			Src:         src,
+			Acs:         params.packAcs(),
+			AcsActor:    actor,
+			AcsTarget:   target,
+			SeqId:       params.seqID,
+			DelId:       params.delID,
+			DelSeq:      params.delSeq,
+			FilterIn:    int(filter.filterIn),
+			FilterOut:   int(filter.filterOut),
+			SingleUser:  filter.singleUser,
+			ExcludeUser: filter.excludeUser,
+		},
+		RcptTo: t.name, SkipSid: skipSid,
+	}
 }
 
 // userIsPresencer returns true if the user (specified by `uid`) may receive presence notifications.
@@ -397,8 +441,15 @@ func (t *Topic) userIsPresencer(uid types.Uid) bool {
 // This is needed because the session(s) may be already disconnected by the time it's routed through topic.
 func (t *Topic) presSubsOnlineDirect(what string, params *presParams, filter *presFilters, skipSid string) {
 	msg := &ServerComMessage{
-		Pres: &MsgServerPres{Topic: t.xoriginal, What: what, Acs: params.packAcs(),
-			SeqId: params.seqID, DelId: params.delID, DelSeq: params.delSeq}}
+		Pres: &MsgServerPres{
+			Topic:  t.xoriginal,
+			What:   what,
+			Acs:    params.packAcs(),
+			SeqId:  params.seqID,
+			DelId:  params.delID,
+			DelSeq: params.delSeq,
+		},
+	}
 
 	for s, pssd := range t.sessions {
 		if !s.isMultiplex() {
@@ -408,7 +459,7 @@ func (t *Topic) presSubsOnlineDirect(what string, params *presParams, filter *pr
 
 			pud := t.perUser[pssd.uid]
 			// Check presence filters
-			if pud.deleted || (!presShouldBypassMode(what) && !presOfflineFilter(pud.modeGiven&pud.modeWant, filter)) {
+			if pud.deleted || !presOfflineFilter(pud.modeGiven&pud.modeWant, what, filter) {
 				continue
 			}
 
@@ -433,7 +484,9 @@ func (t *Topic) presSubsOnlineDirect(what string, params *presParams, filter *pr
 // Communicates "topic unaccessible (cluster rehashing or node connection lost)" event
 // to a list of topics promting the client to resubscribe to the topics.
 func (s *Session) presTermDirect(subs []string) {
-	msg := &ServerComMessage{Pres: &MsgServerPres{Topic: "me", What: "term"}}
+	msg := &ServerComMessage{
+		Pres: &MsgServerPres{Topic: "me", What: "term"},
+	}
 	for _, topic := range subs {
 		msg.Pres.Src = topic
 		s.queueOut(msg)
@@ -451,16 +504,14 @@ func (s *Session) presTermDirect(subs []string) {
 // Case T: message sent, "msg" to all with 'R'
 // Case W.1: messages hard-deleted, "del" to all with 'R'
 func (t *Topic) presSubsOffline(what string, params *presParams,
-	filterSource *presFilters, filterTarget *presFilters,
-	skipSid string, offlineOnly bool) {
-
+	filterSource *presFilters, filterTarget *presFilters, skipSid string, offlineOnly bool) {
 	var skipTopic string
 	if offlineOnly {
 		skipTopic = t.name
 	}
 
 	for uid, pud := range t.perUser {
-		if pud.deleted || (!presShouldBypassMode(what) && !presOfflineFilter(pud.modeGiven&pud.modeWant, filterSource)) {
+		if pud.deleted || !presOfflineFilter(pud.modeGiven&pud.modeWant, what, filterSource) {
 			continue
 		}
 
@@ -476,13 +527,50 @@ func (t *Topic) presSubsOffline(what string, params *presParams,
 		}
 
 		globals.hub.route <- &ServerComMessage{
-			Pres: &MsgServerPres{Topic: "me", What: what, Src: t.original(uid),
-				Acs: params.packAcs(), AcsActor: actor, AcsTarget: target,
-				SeqId: params.seqID, DelId: params.delID,
-				FilterIn: int(filterTarget.filterIn), FilterOut: int(filterTarget.filterOut),
-				SingleUser: filterTarget.singleUser, ExcludeUser: filterTarget.excludeUser,
-				SkipTopic: skipTopic},
-			RcptTo: user, SkipSid: skipSid}
+			Pres: &MsgServerPres{
+				Topic:       "me",
+				What:        what,
+				Src:         t.original(uid),
+				Acs:         params.packAcs(),
+				AcsActor:    actor,
+				AcsTarget:   target,
+				SeqId:       params.seqID,
+				DelId:       params.delID,
+				FilterIn:    int(filterTarget.filterIn),
+				FilterOut:   int(filterTarget.filterOut),
+				SingleUser:  filterTarget.singleUser,
+				ExcludeUser: filterTarget.excludeUser,
+				SkipTopic:   skipTopic,
+			},
+			RcptTo:  user,
+			SkipSid: skipSid,
+		}
+	}
+}
+
+// Publish {info what=read|recv|kp} to topic subscribers's sessions currently offline in the topic,
+// on subscriber's 'me'. Group and P2P.
+func (t *Topic) infoSubsOffline(from types.Uid, what string, seq int, skipSid string) {
+	user := from.UserId()
+
+	for uid, pud := range t.perUser {
+		mode := pud.modeGiven & pud.modeWant
+		if pud.deleted || !mode.IsPresencer() || !mode.IsReader() {
+			continue
+		}
+
+		globals.hub.route <- &ServerComMessage{
+			Info: &MsgServerInfo{
+				Topic:     "me",
+				Src:       t.original(uid),
+				From:      user,
+				What:      what,
+				SeqId:     seq,
+				SkipTopic: t.name,
+			},
+			RcptTo:  uid.UserId(),
+			SkipSid: skipSid,
+		}
 	}
 }
 
@@ -490,13 +578,13 @@ func (t *Topic) presSubsOffline(what string, params *presParams,
 func presSubsOfflineOffline(topic string, cat types.TopicCat, subs []types.Subscription, what string,
 	params *presParams, skipSid string) {
 
-	var count = 0
+	count := 0
 	original := topic
 	for i := range subs {
 		sub := &subs[i]
 		// Let "acs" and "gone" through regardless of 'P'. Don't check for deleted subscriptions:
 		// they are not passed here.
-		if !presShouldBypassMode(what) && !presOfflineFilter(sub.ModeWant&sub.ModeGiven, nil) {
+		if !presOfflineFilter(sub.ModeWant&sub.ModeGiven, what, nil) {
 			continue
 		}
 
@@ -517,10 +605,19 @@ func presSubsOfflineOffline(topic string, cat types.TopicCat, subs []types.Subsc
 		}
 
 		globals.hub.route <- &ServerComMessage{
-			Pres: &MsgServerPres{Topic: "me", What: what, Src: original,
-				Acs: params.packAcs(), AcsActor: actor, AcsTarget: target,
-				SeqId: params.seqID, DelId: params.delID},
-			RcptTo: user, SkipSid: skipSid}
+			Pres: &MsgServerPres{
+				Topic:     "me",
+				What:      what,
+				Src:       original,
+				Acs:       params.packAcs(),
+				AcsActor:  actor,
+				AcsTarget: target,
+				SeqId:     params.seqID,
+				DelId:     params.delID,
+			},
+			RcptTo:  user,
+			SkipSid: skipSid,
+		}
 	}
 }
 
@@ -540,7 +637,7 @@ func (t *Topic) presSingleUserOffline(uid types.Uid, mode types.AccessMode,
 	}
 
 	// ModeInvalid means the user is deleted (pud.deleted == true)
-	if mode != types.ModeInvalid && (presShouldBypassMode(what) || presOfflineFilter(mode, nil)) {
+	if mode != types.ModeInvalid && presOfflineFilter(mode, what, nil) {
 		user := uid.UserId()
 		actor := params.actor
 		target := params.target
@@ -553,18 +650,28 @@ func (t *Topic) presSingleUserOffline(uid types.Uid, mode types.AccessMode,
 		}
 
 		globals.hub.route <- &ServerComMessage{
-			Pres: &MsgServerPres{Topic: "me", What: what,
-				Src: t.original(uid), SeqId: params.seqID, DelId: params.delID,
-				Acs: params.packAcs(), AcsActor: actor, AcsTarget: target, UserAgent: params.userAgent,
-				WantReply: strings.HasPrefix(what, "?unkn"), SkipTopic: skipTopic},
-			RcptTo: user, SkipSid: skipSid}
+			Pres: &MsgServerPres{
+				Topic:     "me",
+				What:      what,
+				Src:       t.original(uid),
+				SeqId:     params.seqID,
+				DelId:     params.delID,
+				Acs:       params.packAcs(),
+				AcsActor:  actor,
+				AcsTarget: target,
+				UserAgent: params.userAgent,
+				WantReply: strings.HasPrefix(what, "?unkn"),
+				SkipTopic: skipTopic,
+			},
+			RcptTo:  user,
+			SkipSid: skipSid,
+		}
 	}
 }
 
 // Announce to a single user on 'me' topic. The originating topic is not used (not loaded or user
 // already unsubscribed).
 func presSingleUserOfflineOffline(uid types.Uid, original, what string, params *presParams, skipSid string) {
-
 	user := uid.UserId()
 	actor := params.actor
 	target := params.target
@@ -577,15 +684,25 @@ func presSingleUserOfflineOffline(uid types.Uid, original, what string, params *
 	}
 
 	globals.hub.route <- &ServerComMessage{
-		Pres: &MsgServerPres{Topic: "me", What: what,
-			Src: original, SeqId: params.seqID, DelId: params.delID,
-			Acs: params.packAcs(), AcsActor: actor, AcsTarget: target},
-		RcptTo: uid.UserId(), SkipSid: skipSid}
+		Pres: &MsgServerPres{
+			Topic:     "me",
+			What:      what,
+			Src:       original,
+			SeqId:     params.seqID,
+			DelId:     params.delID,
+			Acs:       params.packAcs(),
+			AcsActor:  actor,
+			AcsTarget: target,
+		},
+		RcptTo:  uid.UserId(),
+		SkipSid: skipSid,
+	}
 }
 
-// Let other sessions of a given user know what messages are now received/read
+// Let other sessions of a given user know what messages are now received/read.
+// If both 'read' and 'recv' != 0 then 'read' takes precedence over 'recv'.
 // Cases U
-func (t *Topic) presPubMessageCount(uid types.Uid, mode types.AccessMode, recv, read int, skip string) {
+func (t *Topic) presPubMessageCount(uid types.Uid, mode types.AccessMode, read, recv int, skip string) {
 	var what string
 	var seq int
 	if read > 0 {
@@ -608,7 +725,7 @@ func (t *Topic) presPubMessageCount(uid types.Uid, mode types.AccessMode, recv, 
 // Cases V.1, V.2
 func (t *Topic) presPubMessageDelete(uid types.Uid, mode types.AccessMode, delID int, list []MsgDelRange, skip string) {
 	if len(list) == 0 && delID <= 0 {
-		log.Printf("Case V.1, V.2: topic[%s] invalid request - missing payload", t.name)
+		logs.Warn.Printf("Case V.1, V.2: topic[%s] invalid request - missing payload", t.name)
 		return
 	}
 
@@ -627,16 +744,18 @@ func (t *Topic) presPubMessageDelete(uid types.Uid, mode types.AccessMode, delID
 	t.presSingleUserOffline(uid, mode, "del", params, skip, true)
 }
 
-// Filter by permissions: mode.IsPresencer() AND mode has at least some
+// Filter by permissions and notification type: check for exceptions,
+// then check if mode.IsPresencer() AND mode has at least some
 // bits specified in 'filter' (or filter is ModeNone).
-func presOfflineFilter(mode types.AccessMode, pf *presFilters) bool {
+func presOfflineFilter(mode types.AccessMode, what string, pf *presFilters) bool {
+	if what == "acs" || what == "gone" {
+		return true
+	}
+	if what == "upd" && mode.IsJoiner() {
+		return true
+	}
 	return mode.IsPresencer() &&
 		(pf == nil ||
 			((pf.filterIn == types.ModeNone || mode&pf.filterIn != 0) &&
 				(pf.filterOut == types.ModeNone || mode&pf.filterOut == 0)))
-}
-
-// presShouldBypassMode checks if notification of type 'what' should be sent regardless of access permissions.
-func presShouldBypassMode(what string) bool {
-	return what == "acs" || what == "gone" || what == "upd"
 }

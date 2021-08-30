@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"mime"
 	"net/http"
 	"sync/atomic"
@@ -19,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/media"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -27,12 +27,17 @@ import (
 const (
 	defaultServeURL = "/v0/file/s/"
 	handlerName     = "s3"
+	// Presign GET URLs for this number of seconds.
+	presignDuration = 120
 )
 
 type awsconfig struct {
 	AccessKeyId     string   `json:"access_key_id"`
 	SecretAccessKey string   `json:"secret_access_key"`
 	Region          string   `json:"region"`
+	DisableSSL      bool     `json:"disable_ssl"`
+	ForcePathStyle  bool     `json:"force_path_style"`
+	Endpoint        string   `json:"endpoint"`
 	BucketName      string   `json:"bucket"`
 	CorsOrigins     []string `json:"cors_origins"`
 	ServeURL        string   `json:"serve_url"`
@@ -83,8 +88,11 @@ func (ah *awshandler) Init(jsconf string) error {
 
 	var sess *session.Session
 	if sess, err = session.NewSession(&aws.Config{
-		Region:      aws.String(ah.conf.Region),
-		Credentials: credentials.NewStaticCredentials(ah.conf.AccessKeyId, ah.conf.SecretAccessKey, ""),
+		Region:           aws.String(ah.conf.Region),
+		DisableSSL:       aws.Bool(ah.conf.DisableSSL),
+		S3ForcePathStyle: aws.Bool(ah.conf.ForcePathStyle),
+		Endpoint:         aws.String(ah.conf.Endpoint),
+		Credentials:      credentials.NewStaticCredentials(ah.conf.AccessKeyId, ah.conf.SecretAccessKey, ""),
 	}); err != nil {
 		return err
 	}
@@ -142,41 +150,52 @@ func (ah *awshandler) Init(jsconf string) error {
 	return err
 }
 
-// Redirect is used when one wants to serve files from a different external server.
-func (ah *awshandler) Redirect(method, url string) (string, error) {
-	if method == "PUT" || method == "POST" {
-		return "", nil
+// Headers redirects GET, HEAD requests to the AWS server.
+func (ah *awshandler) Headers(req *http.Request, serve bool) (http.Header, int, error) {
+	if req.Method == http.MethodPut || req.Method == http.MethodPost {
+		return nil, 0, nil
 	}
 
-	fid := ah.GetIdFromUrl(url)
+	if headers, status := media.CORSHandler(req, ah.conf.CorsOrigins, serve); status != 0 {
+		return headers, status, nil
+	}
+
+	fid := ah.GetIdFromUrl(req.URL.String())
 	if fid.IsZero() {
-		return "", types.ErrNotFound
+		return nil, 0, types.ErrNotFound
 	}
 
 	fd, err := ah.getFileRecord(fid)
 	if err != nil {
-		return "", err
+		return nil, 0, err
 	}
 
-	var req *request.Request
-	if method == "GET" {
-		req, _ = ah.svc.GetObjectRequest(&s3.GetObjectInput{
+	var awsReq *request.Request
+	if req.Method == http.MethodGet {
+		awsReq, _ = ah.svc.GetObjectRequest(&s3.GetObjectInput{
 			Bucket:              aws.String(ah.conf.BucketName),
 			Key:                 aws.String(fid.String32()),
 			ResponseContentType: aws.String(fd.MimeType),
 		})
-	} else if method == "HEAD" {
-		req, _ = ah.svc.HeadObjectRequest(&s3.HeadObjectInput{
+	} else if req.Method == http.MethodHead {
+		awsReq, _ = ah.svc.HeadObjectRequest(&s3.HeadObjectInput{
 			Bucket: aws.String(ah.conf.BucketName),
 			Key:    aws.String(fid.String32()),
 		})
 	}
 
-	if req != nil {
-		// Presign for 2 minutes.
-		return req.Presign(time.Minute * 2)
+	if awsReq != nil {
+		// Return presigned URL. The URL will stop working after a short period of time to prevent use of Tinode
+		// as a free file server.
+		url, err := awsReq.Presign(time.Second * presignDuration)
+		headers := map[string][]string{
+			"Location":      []string{url},
+			"Content-Type":  []string{"application/json; charset=utf-8"},
+			"Cache-Control": []string{"no-cache, no-store, must-revalidate"},
+		}
+		return headers, http.StatusTemporaryRedirect, err
 	}
-	return "", nil
+	return nil, 0, nil
 }
 
 // Upload processes request for a file upload. The file is given as io.Reader.
@@ -189,7 +208,7 @@ func (ah *awshandler) Upload(fdef *types.FileDef, file io.ReadSeeker) (string, e
 	uploader := s3manager.NewUploaderWithClient(ah.svc)
 
 	if err = store.Files.StartUpload(fdef); err != nil {
-		log.Println("failed to create file record", fdef.Id, err)
+		logs.Warn.Println("failed to create file record", fdef.Id, err)
 		return "", err
 	}
 
@@ -221,7 +240,7 @@ func (ah *awshandler) Upload(fdef *types.FileDef, file io.ReadSeeker) (string, e
 		fname += ext[0]
 	}
 
-	log.Println("aws upload success ", fname, "key", key, "id", fdef.Id)
+	logs.Info.Println("aws upload success ", fname, "key", key, "id", fdef.Id)
 
 	return ah.conf.ServeURL + fname, nil
 }

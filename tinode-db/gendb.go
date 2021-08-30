@@ -21,11 +21,12 @@ func genDb(data *Data) {
 
 	if len(data.Users) == 0 {
 		log.Println("No data provided, stopping")
+
 		return
 	}
 
 	// Add authentication record
-	authHandler := store.GetAuthHandler("basic")
+	authHandler := store.Store.GetAuthHandler("basic")
 	authHandler.Init([]byte(`{"add_to_tags": true}`), "basic")
 
 	nameIndex := make(map[string]string, len(data.Users))
@@ -92,7 +93,7 @@ func genDb(data *Data) {
 			}
 		}
 		// Add authentication record
-		authHandler := store.GetAuthHandler("basic")
+		authHandler := store.Store.GetAuthHandler("basic")
 		passwd := uu.Password
 		if passwd == "(random)" {
 			// Generate random password
@@ -101,7 +102,6 @@ func genDb(data *Data) {
 		}
 		if _, err := authHandler.AddRecord(&auth.Rec{Uid: user.Uid(), AuthLevel: authLevel},
 			[]byte(uu.Username+":"+passwd), ""); err != nil {
-
 			log.Fatal(err)
 		}
 		nameIndex[uu.Username] = user.Id
@@ -109,8 +109,7 @@ func genDb(data *Data) {
 		// Add address book as fnd.private
 		if uu.AddressBook != nil && len(uu.AddressBook) > 0 {
 			if err := store.Subs.Update(user.Uid().FndName(), user.Uid(),
-				map[string]interface{}{"Private": strings.Join(uu.AddressBook, ",")}, true); err != nil {
-
+				map[string]interface{}{"Private": strings.Join(uu.AddressBook, ",")}); err != nil {
 				log.Fatal(err)
 			}
 		}
@@ -319,6 +318,9 @@ func genDb(data *Data) {
 				str := data.Messages[i%len(data.Messages)]
 				// Max time between messages is 2 hours, averate - 1 hour, time is increasing as seqId increases
 				timestamp = timestamp.Add(time.Microsecond * time.Duration(rand.Intn(increment)))
+				if timestamp.After(now) {
+					now = timestamp
+				}
 				if err = store.Messages.Save(&types.Message{
 					ObjHeader: types.ObjHeader{CreatedAt: timestamp},
 					SeqId:     seqId,
@@ -405,6 +407,7 @@ func getCreatedTime(delta string) time.Time {
 	if err != nil && delta != "" {
 		log.Fatal("Invalid duration string", delta)
 	}
+
 	return time.Now().UTC().Round(time.Millisecond).Add(dd)
 }
 
@@ -427,8 +430,7 @@ func parsePublic(public *vCardy, path string) *vcard {
 		return nil
 	}
 
-	fname := public.Photo
-	if fname != "" {
+	if fname := public.Photo; fname != "" {
 		photo = &photoStruct{Type: public.Type}
 		dir, _ := filepath.Split(fname)
 		if dir == "" {

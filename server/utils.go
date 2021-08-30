@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"path/filepath"
 	"reflect"
@@ -20,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 
@@ -43,7 +43,7 @@ func delrangeDeserialize(in []types.Range) []MsgDelRange {
 		return nil
 	}
 
-	var out []MsgDelRange
+	out := make([]MsgDelRange, 0, len(in))
 	for _, r := range in {
 		out = append(out, MsgDelRange{LowId: r.Low, HiId: r.Hi})
 	}
@@ -194,9 +194,9 @@ func normalizeCredentials(creds []MsgCredClient, valueRequired bool) []MsgCredCl
 
 // Get a string slice with methods of credentials.
 func credentialMethods(creds []MsgCredClient) []string {
-	var out []string
+	out := make([]string, len(creds))
 	for i := range creds {
-		out = append(out, creds[i].Method)
+		out[i] = creds[i].Method
 	}
 	return out
 }
@@ -266,7 +266,7 @@ func decodeStoreErrorExplicitTs(err error, id, topic string, serverTs, incomingR
 		case types.ErrTopicNotFound:
 			errmsg = ErrTopicNotFound(id, topic, serverTs, incomingReqTs)
 		case types.ErrNotFound:
-			errmsg = ErrNotFound(id, topic, serverTs, incomingReqTs)
+			errmsg = ErrNotFoundExplicitTs(id, topic, serverTs, incomingReqTs)
 		case types.ErrInvalidResponse:
 			errmsg = ErrInvalidResponse(id, topic, serverTs, incomingReqTs)
 		case types.ErrRedirected:
@@ -362,10 +362,9 @@ func parseVersionPart(vers string) int {
 // Unparceable values are replaced with zeros.
 func parseVersion(vers string) int {
 	var major, minor, patch int
-	// Remove optional "v" prefix.
-	if strings.HasPrefix(vers, "v") {
-		vers = vers[1:]
-	}
+	// Maybe remove the optional "v" prefix.
+	vers = strings.TrimPrefix(vers, "v")
+
 	// We can handle 3 parts only.
 	parts := strings.SplitN(vers, ".", 3)
 	count := len(parts)
@@ -437,7 +436,7 @@ func rewriteTag(orig, countryCode string, withLogin bool) string {
 	param := map[string]interface{}{"countryCode": countryCode}
 	for name, conf := range globals.validators {
 		if conf.addToTags {
-			val := store.GetValidator(name)
+			val := store.Store.GetValidator(name)
 			if tag, _ := val.PreCheck(orig, param); tag != "" {
 				return tag
 			}
@@ -446,9 +445,9 @@ func rewriteTag(orig, countryCode string, withLogin bool) string {
 
 	// Try authenticators now.
 	if withLogin {
-		auths := store.GetAuthNames()
+		auths := store.Store.GetAuthNames()
 		for _, name := range auths {
-			auth := store.GetAuthHandler(name)
+			auth := store.Store.GetAuthHandler(name)
 			if tag := auth.AsTag(orig); tag != "" {
 				return tag
 			}
@@ -459,7 +458,7 @@ func rewriteTag(orig, countryCode string, withLogin bool) string {
 		return orig
 	}
 
-	log.Printf("invalid generic tag '%s'", orig)
+	logs.Warn.Printf("invalid generic tag '%s'", orig)
 
 	return ""
 }
@@ -498,7 +497,7 @@ func parseSearchQuery(query, countryCode string, withLogin bool) ([][]string, []
 		// End of the current token
 		end int
 	}
-	var ctx = context{preOp: AND}
+	ctx := context{preOp: AND}
 	var out []token
 	var prev int
 	query = strings.TrimSpace(query)
@@ -750,6 +749,7 @@ func parseTLSConfig(tlsEnabled bool, jsconfig json.RawMessage) (*tls.Config, err
 	if err != nil {
 		return nil, err
 	}
+
 	return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
 }
 
