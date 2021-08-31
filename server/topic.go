@@ -819,7 +819,7 @@ func (t *Topic) sendImmediateSubNotifications(asUid types.Uid, acs *MsgAccessMod
 	} else if t.cat == types.TopicCatGrp {
 		if sreg.pkt.Sub.Newsub {
 			// For new subscriptions, notify other group members.
-			if pushRcpt := t.pushForGroupSub(asUid, types.TimeNow()); pushRcpt != nil {
+			if pushRcpt := t.pushForGroupSub(asUid, types.TimeNow(), sreg.sess.OrganizationId); pushRcpt != nil {
 				usersPush(pushRcpt)
 			}
 		}

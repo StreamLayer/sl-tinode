@@ -1095,28 +1095,36 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 	limit := a.maxResults
 	userId := uid.String()
 
+	ims := time.Time{}
+
 	if opts != nil {
-		from := []interface{}{userId, rdb.MinVal}
-		to := []interface{}{userId, rdb.MaxVal}
+		// Apply the limit only when the client does not manage the cache (or cold start).
+		// Otherwise have to get all subscriptions and do a manual join with users/topics.
+		if opts.IfModifiedSince == nil {
+			from := []interface{}{userId, rdb.MinVal}
+			to := []interface{}{userId, rdb.MaxVal}
 
-		if opts.LastCreatedAt != nil {
-			if opts.Order == "desc" {
-				to = []interface{}{userId, opts.LastCreatedAt}
-			} else {
-				from = []interface{}{userId, opts.LastCreatedAt}
+			if opts.LastCreatedAt != nil {
+				if opts.Order == "desc" {
+					to = []interface{}{userId, opts.LastCreatedAt}
+				} else {
+					from = []interface{}{userId, opts.LastCreatedAt}
+				}
 			}
-		}
 
-		q = q.Between(from, to, rdb.BetweenOpts{Index: "user_createdAt", LeftBound: "closed", RightBound: "closed"})
+			q = q.Between(from, to, rdb.BetweenOpts{Index: "user_createdAt", LeftBound: "closed", RightBound: "closed"})
 
-		if opts.Order == "desc" {
-			q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Desc("user_createdAt")})
+			if opts.Order == "desc" {
+				q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Desc("user_createdAt")})
+			} else {
+				q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Asc("user_createdAt")})
+			}
+
+			if opts.Limit > 0 && opts.Limit < limit {
+				limit = opts.Limit
+			}
 		} else {
-			q = q.OrderBy(rdb.OrderByOpts{Index: rdb.Asc("user_createdAt")})
-		}
-
-		if opts.Limit > 0 && opts.Limit < limit {
-			limit = opts.Limit
+			ims = *opts.IfModifiedSince
 		}
 	} else {
 		q = q.GetAllByIndex("User", userId)

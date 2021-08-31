@@ -12,6 +12,7 @@ package main
 import (
 	"crypto/tls"
 	"io"
+	"log"
 	"time"
 
 	"github.com/tinode/chat/pbx"

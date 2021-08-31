@@ -1529,12 +1529,6 @@ func ErrPolicyReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
 	return ErrPolicyExplicitTs(msg.Id, msg.Original, ts, msg.Timestamp)
 }
 
-// ErrLockedReply operation rejected because the topic is being deleted
-// with explicit server and incoming request timestamps in response to a client request (423).
-func ErrLockedReply(msg *ClientComMessage, ts time.Time) *ServerComMessage {
-	return ErrLockedExplicitTs(msg.Id, msg.Original, ts, msg.Timestamp)
-}
-
 // ErrUnknown database or other server error (500).
 func ErrUnknown(id, topic string, ts time.Time) *ServerComMessage {
 	return ErrUnknownExplicitTs(id, topic, ts, ts)
