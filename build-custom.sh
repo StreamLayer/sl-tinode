@@ -89,6 +89,7 @@ do
       cp ./server/static/css/*.css ${tmppath}/static/css
       cp ./server/static/index.html ${tmppath}/static
       cp ./server/static/index-dev.html ${tmppath}/static
+      cp ./server/static/version.js ${tmppath}/static
       cp ./server/static/umd/*.js ${tmppath}/static/umd
       cp ./server/static/manifest.json ${tmppath}/static
       cp ./server/static/service-worker.js ${tmppath}/static
@@ -126,7 +127,7 @@ do
   if [ x"$push" = x"true" ]; then
     docker rmi ${rmitags} -f
   fi
-  
+
   docker build --build-arg VERSION=$version --build-arg TARGET_DB=${dbtag} --tag ${rmitags} docker/tinode
 
   if [ x"$push" = x"true" ]; then
