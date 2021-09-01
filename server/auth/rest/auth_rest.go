@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 )
@@ -43,7 +44,7 @@ type request struct {
 	Record     *auth.Rec `json:"rec,omitempty"`
 	Secret     []byte    `json:"secret,omitempty"`
 	RemoteAddr string    `json:"addr,omitempty"`
-	SdkKey 	   string    `json:"sdkKey,omitempty"`
+	SdkKey     string    `json:"sdkKey,omitempty"`
 }
 
 // User initialization data when creating a new user.
@@ -77,6 +78,10 @@ type response struct {
 
 // Init initializes the handler.
 func (a *authenticator) Init(jsonconf json.RawMessage, name string) error {
+	if name == "" {
+		return errors.New("auth_rest: authenticator name cannot be blank")
+	}
+
 	if a.name != "" {
 		return errors.New("auth_rest: already initialized as " + a.name + "; " + name)
 	}
@@ -130,6 +135,11 @@ func (a *authenticator) SaveSdkKey(sdkKey string) error {
 func (a *authenticator) ResetSdkKey() error {
 	a.sdkKey = ""
 	return nil
+}
+
+// IsInitialized returns true if the handler is initialized.
+func (a *authenticator) IsInitialized() bool {
+	return a.name != ""
 }
 
 // Execute HTTP POST to the server at the specified endpoint and with the provided payload.
@@ -202,7 +212,7 @@ func (a *authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey st
 
 	// Auth record not found.
 	if resp.Record == nil {
-		log.Println("rest_auth: invalid response: missing Record")
+		logs.Warn.Println("rest_auth: invalid response: missing Record")
 		return nil, nil, types.ErrInternal
 	}
 
@@ -275,6 +285,7 @@ func (a *authenticator) GenSecret(rec *auth.Rec) ([]byte, time.Time, error) {
 
 // DelRecords deletes all authentication records for the given user.
 func (a *authenticator) DelRecords(uid types.Uid) error {
+	logs.Info.Println("DelRecords, initialized=", a.name != "")
 	_, err := a.callEndpoint("del", &auth.Rec{Uid: uid}, nil, "")
 	return err
 }
@@ -300,7 +311,7 @@ func (a *authenticator) RestrictedTags() ([]string, error) {
 	if len(resp.ByteVal) > 0 {
 		a.reToken, err = regexp.Compile(string(resp.ByteVal))
 		if err != nil {
-			log.Println("rest_auth: invalid token regexp", string(resp.ByteVal))
+			logs.Warn.Println("rest_auth: invalid token regexp", string(resp.ByteVal))
 		}
 	}
 	return resp.StrSliceVal, nil

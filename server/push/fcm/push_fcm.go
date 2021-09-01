@@ -8,11 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 
 	fbase "firebase.google.com/go"
 	fcm "firebase.google.com/go/messaging"
 
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/push"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -32,10 +32,6 @@ const (
 
 	// The number of sub/unsub requests sent in one batch. FCM constant.
 	subBatchSize = 1000
-
-	// Maximum length of a text message in runes. The message is clipped if length is exceeded.
-	// TODO: implement intelligent clipping of Drafty messages.
-	maxMessageLength = 80
 )
 
 // Handler represents the push handler; implements push.PushHandler interface.
@@ -132,7 +128,7 @@ func sendNotifications(rcpt *push.Receipt, config *configType) {
 		resp, err := handler.client.SendAll(ctx, batch)
 		if err != nil {
 			// Complete failure.
-			log.Println("fcm SendAll failed", err)
+			logs.Warn.Println("fcm SendAll failed", err)
 			break
 		}
 
@@ -144,31 +140,70 @@ func sendNotifications(rcpt *push.Receipt, config *configType) {
 }
 
 func processSubscription(req *push.ChannelReq) {
-	devices := DevicesForUser(req.Uid)
-	if len(devices) == 0 {
+	var channel string
+	var devices []string
+	var device string
+	var channels []string
+
+	if req.Channel != "" {
+		devices = DevicesForUser(req.Uid)
+		channel = req.Channel
+	} else if req.DeviceID != "" {
+		channels = ChannelsForUser(req.Uid)
+		device = req.DeviceID
+	}
+
+	if (len(devices) == 0 && device == "") || (len(channels) == 0 && channel == "") {
+		// No channels or devces to subscribe or unsubscribe.
 		return
 	}
 
 	if len(devices) > subBatchSize {
 		// It's extremely unlikely for a single user to have this many devices.
 		devices = devices[0:subBatchSize]
-		log.Println("fcm: user", req.Uid.UserId(), "has more than", subBatchSize, "devices")
+		logs.Warn.Println("fcm: user", req.Uid.UserId(), "has more than", subBatchSize, "devices")
 	}
 
 	var err error
 	var resp *fcm.TopicManagementResponse
-	if req.Unsub {
-		resp, err = handler.client.UnsubscribeFromTopic(context.Background(), devices, req.Channel)
-	} else {
-		resp, err = handler.client.SubscribeToTopic(context.Background(), devices, req.Channel)
+	if channel != "" && len(devices) > 0 {
+		if req.Unsub {
+			resp, err = handler.client.UnsubscribeFromTopic(context.Background(), devices, channel)
+		} else {
+			resp, err = handler.client.SubscribeToTopic(context.Background(), devices, channel)
+		}
+		if err != nil {
+			// Complete failure.
+			logs.Warn.Println("fcm: sub or upsub failed", req.Unsub, err)
+		} else {
+			// Check for partial failure.
+			handleSubErrors(resp, req.Uid, devices)
+		}
+		return
 	}
-	if err != nil {
-		// Complete failure.
-		log.Println("fcm: sub or upsub failed", req.Unsub, err)
-	} else {
-		// Check for partial failure.
-		handleSubErrors(resp, req.Uid, devices)
+
+	if device != "" && len(channels) > 0 {
+		devices := []string{device}
+		for _, channel := range channels {
+			if req.Unsub {
+				resp, err = handler.client.UnsubscribeFromTopic(context.Background(), devices, channel)
+			} else {
+				resp, err = handler.client.SubscribeToTopic(context.Background(), devices, channel)
+			}
+			if err != nil {
+				// Complete failure.
+				logs.Warn.Println("fcm: sub or upsub failed", req.Unsub, err)
+				break
+			}
+			// Check for partial failure.
+			handleSubErrors(resp, req.Uid, devices)
+		}
+		return
 	}
+
+	// Invalid request: either multiple channels & multiple devices (not supported) or no channels and no devices.
+	logs.Err.Println("fcm: user", req.Uid.UserId(), "invalid combination of sub/unsub channels/devices",
+		len(devices), len(channels))
 }
 
 // handlePushError processes errors returned by a call to fcm.SendAll.
@@ -193,7 +228,7 @@ func handleSubErrors(response *fcm.TopicManagementResponse, uid types.Uid, devic
 
 	for _, errinfo := range response.Errors {
 		// FCM documentation sucks. There is no list of possible errors so no action can be taken but logging.
-		log.Println("fcm sub/unsub error", errinfo.Reason, uid, devices[errinfo.Index])
+		logs.Warn.Println("fcm sub/unsub error", errinfo.Reason, uid, devices[errinfo.Index])
 	}
 }
 
@@ -203,24 +238,24 @@ func handleFcmError(err error, uid types.Uid, deviceId string) bool {
 		fcm.IsInternal(err) ||
 		fcm.IsUnknown(err) {
 		// Transient errors. Stop sending this batch.
-		log.Println("fcm transient failure", err)
+		logs.Warn.Println("fcm transient failure", err)
 		return false
 	}
 	if fcm.IsMismatchedCredential(err) || fcm.IsInvalidArgument(err) {
 		// Config errors
-		log.Println("fcm: request failed", err)
+		logs.Warn.Println("fcm: request failed", err)
 		return false
 	}
 
 	if fcm.IsRegistrationTokenNotRegistered(err) {
 		// Token is no longer valid.
-		log.Println("fcm: invalid token", uid, err)
+		logs.Warn.Println("fcm: invalid token", uid, err)
 		if err := store.Devices.Delete(uid, deviceId); err != nil {
-			log.Println("fcm: failed to delete invalid token", err)
+			logs.Warn.Println("fcm: failed to delete invalid token", err)
 		}
 	} else {
 		// All other errors are treated as non-fatal.
-		log.Println("fcm error:", err)
+		logs.Warn.Println("fcm error:", err)
 	}
 	return true
 }

@@ -39,7 +39,7 @@ from tn_globals import stdoutln
 from tn_globals import to_json
 
 APP_NAME = "tn-cli"
-APP_VERSION = "1.5.5"
+APP_VERSION = "1.5.8"
 PROTOCOL_VERSION = "0"
 LIB_VERSION = pkg_resources.get_distribution("tinode_grpc").version
 GRPC_VERSION = pkg_resources.get_distribution("grpcio").version
@@ -86,8 +86,8 @@ class dotdict(dict):
     __delattr__ = dict.__delitem__
 
 
-# Pack user's name and avatar into a vcard.
-def make_vcard(fn, photofile):
+# Pack user's name and avatar into a theCard.
+def makeTheCard(fn, photofile):
     card = None
 
     if (fn != None and fn.strip() != "") or photofile != None:
@@ -295,7 +295,7 @@ def stdin(InputQueue):
     except Exception as ex:
         printerr("Exception in stdin", ex)
 
-    InputQueue.append("exit")
+    InputQueue.append('exit')
 
 # Constructing individual messages
 # {hi}
@@ -326,7 +326,7 @@ def accMsg(id, cmd, ignored):
     elif cmd.suspend == 'false':
         state = 'ok'
 
-    cmd.public = encode_to_bytes(make_vcard(cmd.fn, cmd.photo))
+    cmd.public = encode_to_bytes(makeTheCard(cmd.fn, cmd.photo))
     cmd.private = encode_to_bytes(cmd.private)
     return pb.ClientMsg(acc=pb.ClientAcc(id=str(id), user_id=cmd.user, state=state,
         scheme=cmd.scheme, secret=cmd.secret, login=cmd.do_login, tags=cmd.tags.split(",") if cmd.tags else None,
@@ -366,7 +366,7 @@ def subMsg(id, cmd, ignored):
         cmd.topic = tn_globals.DefaultTopic
     if cmd.get_query:
         cmd.get_query = pb.GetQuery(what=" ".join(cmd.get_query.split(",")))
-    cmd.public = encode_to_bytes(make_vcard(cmd.fn, cmd.photo))
+    cmd.public = encode_to_bytes(makeTheCard(cmd.fn, cmd.photo))
     cmd.private = encode_to_bytes(cmd.private)
     return pb.ClientMsg(sub=pb.ClientSub(id=str(id), topic=cmd.topic,
         set_query=pb.SetQuery(
@@ -433,7 +433,7 @@ def setMsg(id, cmd, ignored):
         cmd.topic = tn_globals.DefaultTopic
 
     if cmd.public == None:
-        cmd.public = encode_to_bytes(make_vcard(cmd.fn, cmd.photo))
+        cmd.public = encode_to_bytes(makeTheCard(cmd.fn, cmd.photo))
     else:
         cmd.public = encode_to_bytes(cmd.public)
     cmd.private = encode_to_bytes(cmd.private)
@@ -815,20 +815,28 @@ def serialize_cmd(string, id, args):
         elif cmd.cmd == ".use":
             if cmd.user != "unchanged":
                 if cmd.user:
-                    tn_globals.DefaultUser = cmd.user
+                    if len(cmd.user) > 3 and cmd.user.startswith("usr"):
+                        tn_globals.DefaultUser = cmd.user
+                    else:
+                        stdoutln("Error: user ID '{}' is invalid".format(cmd.user))
                 else:
                     tn_globals.DefaultUser = None
-                stdoutln("Default user='" + cmd.user + "'")
+                stdoutln("Default user='{}'".format(tn_globals.DefaultUser))
+
             if cmd.topic != "unchanged":
                 if cmd.topic:
-                    tn_globals.DefaultTopic = cmd.topic
+                    if cmd.topic[:3] in ['me', 'fnd', 'sys', 'usr', 'grp', 'chn']:
+                        tn_globals.DefaultTopic = cmd.topic
+                    else:
+                        stdoutln("Error: topic '{}' is invalid".format(cmd.topic))
                 else:
                     tn_globals.DefaultTopic = None
-                stdoutln("Default topic='" + cmd.topic + "'")
+                stdoutln("Default topic='{}'".format(tn_globals.DefaultTopic))
+
             return None, None
 
         elif cmd.cmd == ".sleep":
-            stdoutln("Pausing for " + str(cmd.millis) + "ms...")
+            stdoutln("Pausing for {}ms...".format(cmd.millis))
             time.sleep(cmd.millis/1000.)
             return None, None
 
@@ -856,6 +864,13 @@ def serialize_cmd(string, id, args):
     except Exception as err:
         stdoutln("Error in '{0}': {1}".format(cmd.cmd, err))
         return None, None
+
+def pop_from_output_queue():
+    if tn_globals.OutputQueue.empty():
+        return False
+    sys.stdout.write("\r<= "+tn_globals.OutputQueue.get())
+    sys.stdout.flush()
+    return True
 
 # Generator of protobuf messages.
 def gen_message(scheme, secret, args):
@@ -894,6 +909,9 @@ def gen_message(scheme, secret, args):
                 inp = tn_globals.InputQueue.popleft()
 
                 if inp == 'exit' or inp == 'quit' or inp == '.exit' or inp == '.quit':
+                    # Drain the output queue.
+                    while pop_from_output_queue():
+                        pass
                     return
 
                 pbMsg, cmd = serialize_cmd(inp, id, args)
@@ -918,8 +936,7 @@ def gen_message(scheme, secret, args):
                         yield pbMsg
 
             elif not tn_globals.OutputQueue.empty():
-                sys.stdout.write("\r<= "+tn_globals.OutputQueue.get())
-                sys.stdout.flush()
+                pop_from_output_queue()
                 print_prompt = tn_globals.IsInteractive
 
             else:
@@ -932,7 +949,10 @@ def gen_message(scheme, secret, args):
                         stdoutln("Timeout while waiting for '{0}' response".format(tn_globals.WaitingFor.cmd))
                         tn_globals.WaitingFor = None
 
-                time.sleep(0.1)
+                if tn_globals.IsInteractive:
+                    time.sleep(0.1)
+                else:
+                    time.sleep(0.01)
 
         except Exception as err:
             stdoutln("Exception in generator: {0}".format(err))
@@ -960,6 +980,7 @@ def handle_ctrl(ctrl):
 
 # The main processing loop: send messages to server, receive responses.
 def run(args, schema, secret):
+    failed = False
     try:
         if tn_globals.IsInteractive:
             tn_globals.Prompt = PromptSession()
@@ -1029,14 +1050,17 @@ def run(args, schema, secret):
     except grpc.RpcError as err:
         # print(err)
         printerr("gRPC failed with {0}: {1}".format(err.code(), err.details()))
+        failed = True
     except Exception as ex:
         printerr("Request failed: {0}".format(ex))
-        # print(traceback.format_exc())
+        failed = True
     finally:
         printout('Shutting down...')
         channel.close()
         if tn_globals.InputThread != None:
             tn_globals.InputThread.join(0.3)
+
+    return 1 if failed else 0
 
 # Read cookie file for logging in with the cookie.
 def read_cookie():
@@ -1154,4 +1178,4 @@ if __name__ == '__main__':
     if args.background is None and not tn_globals.IsInteractive:
         args.background = True
 
-    run(args, schema, secret)
+    sys.exit(run(args, schema, secret))

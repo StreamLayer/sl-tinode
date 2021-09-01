@@ -4,7 +4,7 @@
 
 Tinode is *not* XMPP/Jabber. It is *not* compatible with XMPP. It's meant as a replacement for XMPP. On the surface, it's a lot like open source WhatsApp or Telegram.
 
-Version 0.16. This is beta-quality software: feature-complete but probably with a few bugs. Follow [instructions](INSTALL.md) to install and run or use one of the cloud services below. Read [API documentation](docs/API.md).
+Version 0.17. This is beta-quality software: feature-complete and stable but probably with a few bugs. Follow [instructions](INSTALL.md) to install and run or use one of the cloud services below. Read [API documentation](docs/API.md).
 
 <a href="https://apps.apple.com/us/app/tinode/id1483763538"><img src="docs/app-store.svg" height=36></a> <a href="https://play.google.com/store/apps/details?id=co.tinode.tindroidx"><img src="docs/play-store.svg" height=36></a> <a href="https://web.tinode.co/"><img src="docs/web-app.svg" height=36></a>
 
@@ -20,10 +20,19 @@ See [general instructions](./INSTALL.md) or [docker-specific instructions](./doc
 
 ## Getting support
 
-* Read [API documentation](docs/API.md) and [FAQ](docs/faq.md).
+* Read [API documentation](docs/API.md) and [FAQ](docs/faq.md). Read configuration instructions contained in the [`tinode.conf`](./server/tinode.conf) file.
 * For support, general questions, discussions post to [https://groups.google.com/d/forum/tinode](https://groups.google.com/d/forum/tinode).
-* For bugs and feature requests [open an issue](https://github.com/tinode/chat/issues/new).
+* For bugs and feature requests [open an issue](https://github.com/tinode/chat/issues/new/choose).
 
+## Helping out
+
+* Consider buying paid support: https://tinode.co/support.html
+* If you are a software developer, send us your pull requests with bug fixes and feature requests.
+* If you use the app and discover bugs or missing features, please let us know by filing bug reports and feature requests.
+* If you speak a language other than English, you can translate the apps into your language.
+* If you are a UI/UX expert, help us polish the app UI.
+* Let people know about Tinode: write a blog post or an article about Tinode, share your findings and experiences at conferences.
+* Use it: install it for your colleagues or friends at work or at home.
 
 ## Public service
 
@@ -31,17 +40,15 @@ A [public Tinode service](https://web.tinode.co/) is now available. You can use 
 
 ### Web
 
-TinodeWeb, a single page web app, is available at https://web.tinode.co/ ([source](https://github.com/tinode/webapp/)). See screenshots below. Currently available in English, Simplified Chinese, Korean, Russian, Spanish. More translations are welcome.
-
+TinodeWeb, a single page web app, is available at https://web.tinode.co/ ([source](https://github.com/tinode/webapp/)). See screenshots below. Currently available in English, Simplified Chinese, Traditional Chinese, Korean, Russian, Spanish. More translations are welcome.
 
 ### Android
 
-[Tinode for Android](https://play.google.com/store/apps/details?id=co.tinode.tindroidx) a.k.a Tindroid is stable and functional ([source](https://github.com/tinode/tindroid)). See the screenshots below. A [debug APK](https://github.com/tinode/tindroid/releases/latest) is also provided for convenience. Currently available in English, Simplified Chinese, Korean, Russian, Spanish. More translations are welcome.
-
+[Tinode for Android](https://play.google.com/store/apps/details?id=co.tinode.tindroidx) a.k.a Tindroid is stable and functional ([source](https://github.com/tinode/tindroid)). See the screenshots below. A [debug APK](https://github.com/tinode/tindroid/releases/latest) is also provided for convenience. Currently available in English, Simplified Chinese, Traditional Chinese, Korean, Russian, Spanish. More translations are welcome.
 
 ### iOS
 
-[Tinode for iOS](https://apps.apple.com/app/reference-to-tinodios-here/id123) a.k.a. Tinodios is stable and functional ([source](https://github.com/tinode/ios)). See the screenshots below. Currently available in English, Simplified Chinese, Spanish. More translations are welcome.
+[Tinode for iOS](https://apps.apple.com/app/reference-to-tinodios-here/id123) a.k.a. Tinodios is stable and functional ([source](https://github.com/tinode/ios)). See the screenshots below. Currently available in English, Simplified Chinese, Traditional Chinese, Spanish. More translations are welcome.
 
 
 ## Demo/Sandbox
@@ -89,10 +96,11 @@ When you register a new account you are asked for an email address to send valid
 * Inline images, file attachments.
 * Forms and templated responses suitable for chatbots.
 * Message status notifications: message delivery to server; received and read notifications; typing notifications.
+* Most recent message preview in contact list.
 * Ability to block unwanted communication server-side.
 * Anonymous users (important for use cases related to tech support over chat).
 * Storage and out of band transfer of large objects like video files using local file system or Amazon S3.
-* Plugins to extend functionality, for example, to enable chatbots.
+* Plugins to extend functionality, for example, to support moderation or chatbots.
 
 ### Planned
 
@@ -106,11 +114,25 @@ When you register a new account you are asked for an email address to send valid
 
 ### Translations
 
-All client software has support for internationalization. Translations are provided on all platforms for English, Simplified Chinese, Spanish. On all but iOS: Russian, Korean, German. More translations are welcome. Particularly interested in Arabic, Vietnamese, Persian, Indonesian, Portuguese, Hindi, Bengali.
+All client software has support for [internationalization](docs/translations.md). The following translations are provided:
+
+| Language | Server | Webapp | Android | iOS |
+| --- | :---: | :---: | :---: | :---: |
+| English | &check; | &check; | &check; | &check; |
+| Chinese (simplified) | &check; | &check; | &check; | &check; |
+| Chinese (traditional) |   | &check; | &check; | &check; |
+| French | &check; |   |   |   |
+| German |   | &check; | &check; |   |
+| Korean |   | &check; | &check; |   |
+| Romanian |   | &check; |   |   |
+| Russian | &check; | &check; | &check; | &check; |
+| Spanish | &check; | &check; | &check; | &check; |
+
+More translations are [welcome](docs/translations.md). Particularly interested in Arabic, Vietnamese, Persian, Indonesian, Portuguese, Hindi, Bengali.
 
 ## Third-Party Licenses
 
-* Demo avatars and some other graphics are from https://www.pexels.com/ under [CC0](https://www.pexels.com/photo-license/) license.
+* Demo avatars and some other graphics are from https://www.pexels.com/ under [CC0 license](https://www.pexels.com/photo-license/) and https://pixabay.com/ under their [license](https://pixabay.com/service/license/).
 * Web and Android background patterns are from http://subtlepatterns.com/ under [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) license.
 * Android icons are from https://material.io/tools/icons/ under [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.html) license.
 * Some iOS icons are from https://icons8.com/ under [CC BY-ND 3.0](https://icons8.com/license) license.
@@ -134,13 +156,13 @@ All client software has support for internationalization. Translations are provi
 ### [Desktop Web](https://github.com/tinode/webapp/)
 
 <p align="center">
-  <img src="docs/web-desktop-2.png" alt="Desktop web: full app" width=810 />
+  <img src="docs/web-desktop.jpg" alt="Desktop web: full app" width=810 />
 </p>
 
 ### [Mobile Web](https://github.com/tinode/webapp/)
 
 <p align="center">
-  <img src="docs/web-mob-contacts-1.png" alt="Mobile web: contacts" width=250 /> <img src="docs/web-mob-chat-1.png" alt="Mobile web: chat" width=250 /> <img src="docs/web-mob-info-1.png" alt="Mobile web: topic info" width=250 />
+  <img src="docs/web-mob-contacts.png" alt="Mobile web: contacts" width=250 /> <img src="docs/web-mob-chat.png" alt="Mobile web: chat" width=250 /> <img src="docs/web-mob-info.png" alt="Mobile web: topic info" width=250 />
 </p>
 
 
@@ -152,7 +174,7 @@ Words 'chat' and 'instant messaging' in Chinese, Russian, Persian and a few othe
 * чат мессенджер
 * インスタントメッセージ
 * 인스턴트 메신저
-* پیام‌رسانی فوری گپ
+* پیام رسان فوری
 * تراسل فوري
 * Nhắn tin tức thời
 * anlık mesajlaşma sohbet

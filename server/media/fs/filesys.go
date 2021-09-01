@@ -7,11 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/media"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -23,14 +24,16 @@ const (
 )
 
 type configType struct {
-	FileUploadDirectory string `json:"upload_dir"`
-	ServeURL            string `json:"serve_url"`
+	FileUploadDirectory string   `json:"upload_dir"`
+	ServeURL            string   `json:"serve_url"`
+	CorsOrigins         []string `json:"cors_origins"`
 }
 
 type fshandler struct {
 	// In case of a cluster fileUploadLocation must be accessible to all cluster members.
 	fileUploadLocation string
 	serveURL           string
+	corsOrigins        []string
 }
 
 func (fh *fshandler) Init(jsconf string) error {
@@ -55,10 +58,10 @@ func (fh *fshandler) Init(jsconf string) error {
 	return os.MkdirAll(fh.fileUploadLocation, 0777)
 }
 
-// Redirect is used when one wants to serve files from a different external server.
-func (fshandler) Redirect(method, url string) (string, error) {
-	// This handler does not use redirects.
-	return "", nil
+// Headers is used for serving CORS headers.
+func (fh *fshandler) Headers(req *http.Request, serve bool) (http.Header, int, error) {
+	header, status := media.CORSHandler(req, fh.corsOrigins, serve)
+	return header, status, nil
 }
 
 // Upload processes request for file upload. The file is given as io.Reader.
@@ -72,14 +75,14 @@ func (fh *fshandler) Upload(fdef *types.FileDef, file io.ReadSeeker) (string, er
 
 	outfile, err := os.Create(fdef.Location)
 	if err != nil {
-		log.Println("Upload: failed to create file", fdef.Location, err)
+		logs.Warn.Println("Upload: failed to create file", fdef.Location, err)
 		return "", err
 	}
 
 	if err = store.Files.StartUpload(fdef); err != nil {
 		outfile.Close()
 		os.Remove(fdef.Location)
-		log.Println("failed to create file record", fdef.Id, err)
+		logs.Warn.Println("failed to create file record", fdef.Id, err)
 		return "", err
 	}
 
@@ -116,7 +119,7 @@ func (fh *fshandler) Download(url string) (*types.FileDef, media.ReadSeekCloser,
 
 	fd, err := fh.getFileRecord(fid)
 	if err != nil {
-		log.Println("Download: file not found", fid)
+		logs.Warn.Println("Download: file not found", fid)
 		return nil, nil, err
 	}
 
@@ -137,7 +140,7 @@ func (fh *fshandler) Delete(locations []string) error {
 	for _, loc := range locations {
 		if err, _ := os.Remove(loc).(*os.PathError); err != nil {
 			if err != os.ErrNotExist {
-				log.Println("fs: error deleting file", loc, err)
+				logs.Warn.Println("fs: error deleting file", loc, err)
 			}
 		}
 	}

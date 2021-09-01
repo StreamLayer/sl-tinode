@@ -10,13 +10,13 @@ package main
 
 import (
 	"container/list"
-	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/tinode/chat/pbx"
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 )
@@ -40,14 +40,14 @@ func (ss *SessionStore) NewSession(conn interface{}, sid string) (*Session, int)
 	var s Session
 
 	if sid == "" {
-		s.sid = store.GetUidString()
+		s.sid = store.Store.GetUidString()
 	} else {
 		s.sid = sid
 	}
 
 	ss.lock.Lock()
 	if _, found := ss.sessCache[s.sid]; found {
-		log.Fatalln("ERROR! duplicate session ID", s.sid)
+		logs.Err.Fatalln("ERROR! duplicate session ID", s.sid)
 	}
 	ss.lock.Unlock()
 
@@ -65,7 +65,7 @@ func (ss *SessionStore) NewSession(conn interface{}, sid string) (*Session, int)
 		s.proto = GRPC
 		s.grpcnode = c
 	default:
-		log.Panicln("session: unknown connection type", conn)
+		logs.Err.Panicln("session: unknown connection type", conn)
 	}
 
 	s.subs = make(map[string]*Subscription)
@@ -150,6 +150,17 @@ func (ss *SessionStore) Delete(s *Session) {
 	statsSet("LiveSessions", int64(len(ss.sessCache)))
 }
 
+// Range calls given function for all sessions. It stops if the function returns false.
+func (ss *SessionStore) Range(f func(sid string, s *Session) bool) {
+	ss.lock.Lock()
+	for sid, s := range ss.sessCache {
+		if !f(sid, s) {
+			break
+		}
+	}
+	ss.lock.Unlock()
+}
+
 // Shutdown terminates sessionStore. No need to clean up.
 // Don't send to clustered sessions, their servers are not being shut down.
 func (ss *SessionStore) Shutdown() {
@@ -166,7 +177,7 @@ func (ss *SessionStore) Shutdown() {
 
 	// TODO: Consider broadcasting shutdown to other cluster nodes.
 
-	log.Println("SessionStore shut down, sessions terminated:", len(ss.sessCache))
+	logs.Info.Println("SessionStore shut down, sessions terminated:", len(ss.sessCache))
 }
 
 // EvictUser terminates all sessions of a given user.

@@ -10,23 +10,23 @@
 package main
 
 import (
-	"log"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 )
 
-// Request latency distribution bounds (in milliseconds).
+// RequestLatencyDistribution is an array of request latency distribution bounds (in milliseconds).
 // "var" because Go does not support array constants.
-var RequestLatencyDistribution = []float64{1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 25, 30, 40, 50, 65, 80, 100, 130,
+var requestLatencyDistribution = []float64{1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 25, 30, 40, 50, 65, 80, 100, 130,
 	160, 200, 250, 300, 400, 500, 650, 800, 1000, 2000, 5000, 10000, 20000, 50000, 100000}
 
-// Outgoing message size distribution bounds (in bytes).
-var OutgoingMessageSizeDistribution = []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 16384,
+// OutgoingMessageSizeDistribution is an array of outgoing message size distribution bounds (in bytes).
+var outgoingMessageSizeDistribution = []float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 16384,
 	65536, 262144, 1048576, 4194304, 16777216, 67108864, 268435456, 1073741824, 4294967296}
 
 // Request to hub to subscribe session to topic
@@ -47,7 +47,7 @@ type sessionLeave struct {
 
 // Request to hub to remove the topic
 type topicUnreg struct {
-	// Original request, could be nil,
+	// Original request, could be nil.
 	pkt *ClientComMessage
 	// Session making the request, could be nil.
 	sess *Session
@@ -78,6 +78,9 @@ type Hub struct {
 	// Topics must be indexed by name
 	topics *sync.Map
 
+	// Current number of loaded topics
+	numTopics int
+
 	// Channel for routing messages between topics, buffered at 4096
 	route chan *ServerComMessage
 
@@ -105,15 +108,17 @@ func (h *Hub) topicGet(name string) *Topic {
 }
 
 func (h *Hub) topicPut(name string, t *Topic) {
+	h.numTopics++
 	h.topics.Store(name, t)
 }
 
 func (h *Hub) topicDel(name string) {
+	h.numTopics--
 	h.topics.Delete(name)
 }
 
 func newHub() *Hub {
-	var h = &Hub{
+	h := &Hub{
 		topics: &sync.Map{},
 		// this needs to be buffered - hub generates invites and adds them to this queue
 		route:    make(chan *ServerComMessage, 4096),
@@ -144,8 +149,8 @@ func newHub() *Hub {
 	statsRegisterInt("CtrlCodesTotal4xx")
 	statsRegisterInt("CtrlCodesTotal5xx")
 
-	statsRegisterHistogram("RequestLatency", RequestLatencyDistribution)
-	statsRegisterHistogram("OutgoingMessageSize", OutgoingMessageSizeDistribution)
+	statsRegisterHistogram("RequestLatency", requestLatencyDistribution)
+	statsRegisterHistogram("OutgoingMessageSize", outgoingMessageSizeDistribution)
 
 	go h.run()
 
@@ -158,7 +163,6 @@ func newHub() *Hub {
 }
 
 func (h *Hub) run() {
-
 	for {
 		select {
 		case join := <-h.join:
@@ -175,7 +179,8 @@ func (h *Hub) run() {
 			t := h.topicGet(join.pkt.RcptTo)
 			if t == nil {
 				// Topic does not exist or not loaded.
-				t = &Topic{name: join.pkt.RcptTo,
+				t = &Topic{
+					name:      join.pkt.RcptTo,
 					xoriginal: join.pkt.Original,
 					// Indicates a proxy topic.
 					isProxy:   globals.cluster.isRemoteTopic(join.pkt.RcptTo),
@@ -204,7 +209,6 @@ func (h *Hub) run() {
 
 				// Configure the topic.
 				go topicInit(t, join, h)
-
 			} else {
 				// Topic found.
 				// Topic will check access rights and send appropriate {ctrl}
@@ -215,7 +219,8 @@ func (h *Hub) run() {
 						join.sess.inflightReqs.Done()
 					}
 					join.sess.queueOut(ErrServiceUnavailableReply(join.pkt, join.pkt.Timestamp))
-					log.Println("hub.join loop: topic's reg queue full", join.pkt.RcptTo, join.sess.sid, " - total queue len:", len(t.reg))
+					logs.Err.Println("hub.join loop: topic's reg queue full", join.pkt.RcptTo, join.sess.sid,
+						" - total queue len:", len(t.reg))
 				}
 			}
 
@@ -229,16 +234,16 @@ func (h *Hub) run() {
 					select {
 					case dst.broadcast <- msg:
 					default:
-						log.Println("hub: topic's broadcast queue is full", dst.name)
+						logs.Err.Println("hub: topic's broadcast queue is full", dst.name)
 					}
 				} else {
-					log.Println("hub: invalid topic category for broadcast", dst.name)
+					logs.Warn.Println("hub: invalid topic category for broadcast", dst.name)
 				}
 			} else if (strings.HasPrefix(msg.RcptTo, "usr") || strings.HasPrefix(msg.RcptTo, "grp")) &&
 				globals.cluster.isRemoteTopic(msg.RcptTo) {
 				// It is a remote topic.
 				if err := globals.cluster.routeToTopicIntraCluster(msg.RcptTo, msg, msg.sess); err != nil {
-					log.Printf("hub: routing to '%s' failed", msg.RcptTo)
+					logs.Warn.Printf("hub: routing to '%s' failed", msg.RcptTo)
 				}
 			} else if msg.Pres == nil && msg.Info == nil {
 				// Topic is unknown or offline.
@@ -246,7 +251,7 @@ func (h *Hub) run() {
 
 				// TODO(gene): validate topic name, discarding invalid topics
 
-				log.Printf("Hub. Topic[%s] is unknown or offline", msg.RcptTo)
+				logs.Info.Printf("Hub. Topic[%s] is unknown or offline", msg.RcptTo)
 
 				msg.sess.queueOut(NoErrAcceptedExplicitTs(msg.Id, msg.RcptTo, types.TimeNow(), msg.Timestamp))
 			}
@@ -276,7 +281,7 @@ func (h *Hub) run() {
 			if unreg.forUser.IsZero() {
 				// The topic is being garbage collected or deleted.
 				if err := h.topicUnreg(unreg.sess, unreg.rcptTo, unreg.pkt, reason); err != nil {
-					log.Println("hub.topicUnreg failed:", err)
+					logs.Err.Println("hub.topicUnreg failed:", err)
 				}
 			} else {
 				go h.stopTopicsForUser(unreg.forUser, reason, unreg.done)
@@ -321,7 +326,7 @@ func (h *Hub) run() {
 				<-topicsdone
 			}
 
-			log.Printf("Hub shutdown completed with %d topics", topicCount)
+			logs.Info.Printf("Hub shutdown completed with %d topics", topicCount)
 
 			// let the main goroutine know we are done with the cleanup
 			hubdone <- true
@@ -409,15 +414,25 @@ func (h *Hub) topicUnreg(sess *Session, topic string, msg *ClientComMessage, rea
 				msg.MetaWhat = constMsgDelTopic
 				t.meta <- &metaReq{
 					pkt:  msg,
-					sess: sess}
+					sess: sess,
+				}
 			}
-
 		} else {
 			// Case 1.2: topic is offline.
 
-			asUid := types.ParseUserId(msg.AsUser)
-			// Get all subscribers: we need to know how many are left and notify them.
-			subs, err := store.Topics.GetSubs(topic, nil)
+			tcat := topicCat(topic)
+			var opts *types.QueryOpt
+			if tcat == types.TopicCatGrp {
+				opts = &types.QueryOpt{User: asUid}
+				// Is user a channel subscriber? Use chnABC instead of grpABC.
+				if types.IsChannel(msg.Original) {
+					topic = msg.Original
+				}
+			}
+
+			// For P2P topics get all subscribers: we need to know how many are left and notify them.
+			// For gourp topics (and channels) get just the user's subscription.
+			subs, err := store.Topics.GetSubs(topic, opts)
 			if err != nil {
 				sess.queueOut(ErrUnknownReply(msg, now))
 				return err
@@ -439,11 +454,10 @@ func (h *Hub) topicUnreg(sess *Session, topic string, msg *ClientComMessage, rea
 
 			if sub == nil {
 				// If user has no subscription, tell him all is fine
-				sess.queueOut(InfoNoAction(msg.Id, msg.Original, now, msg.Timestamp))
+				sess.queueOut(InfoNoActionReply(msg, now))
 				return nil
 			}
 
-			tcat := topicCat(topic)
 			if !(sub.ModeGiven & sub.ModeWant).IsOwner() {
 				// Case 1.2.2.1 Not the owner, but possibly last subscription in a P2P topic.
 
@@ -453,7 +467,6 @@ func (h *Hub) topicUnreg(sess *Session, topic string, msg *ClientComMessage, rea
 						sess.queueOut(ErrUnknownReply(msg, now))
 						return err
 					}
-
 				} else if err := store.Subs.Delete(topic, asUid); err != nil {
 					// Not P2P or more than 1 subscription left.
 					// Delete user's own subscription only
@@ -477,7 +490,6 @@ func (h *Hub) topicUnreg(sess *Session, topic string, msg *ClientComMessage, rea
 					// Tell user2 that user1 is offline but let him keep sending updates in case user1 resubscribes.
 					presSingleUserOfflineOffline(uid2, uname1, "off", nilPresParams, "")
 				}
-
 			} else {
 				// Case 1.2.1.1: owner, delete the group topic from db.
 				// Only group topics have owners.
@@ -492,7 +504,6 @@ func (h *Hub) topicUnreg(sess *Session, topic string, msg *ClientComMessage, rea
 
 			sess.queueOut(NoErrReply(msg, now))
 		}
-
 	} else {
 		// Case 2: just unregister.
 		// If t is nil, it's not registered, no action is needed
@@ -529,9 +540,7 @@ func (h *Hub) stopTopicsForUser(uid types.Uid, reason int, alldone chan<- bool) 
 		topic := t.(*Topic)
 		if _, isMember := topic.perUser[uid]; (topic.cat != types.TopicCatGrp && isMember) ||
 			topic.owner == uid {
-
 			topic.markDeleted()
-
 			h.topics.Delete(name)
 
 			// This call is non-blocking unless some other routine tries to stop it at the same time.
@@ -564,10 +573,10 @@ func replyOfflineTopicGetDesc(sess *Session, msg *ClientComMessage) {
 	asUid := types.ParseUserId(msg.AsUser)
 	topic := msg.RcptTo
 
-	if strings.HasPrefix(topic, "grp") {
+	if strings.HasPrefix(topic, "grp") || topic == "sys" {
 		stopic, err := store.Topics.Get(topic)
 		if err != nil {
-			log.Println("replyOfflineTopicGetDesc", err)
+			logs.Info.Println("replyOfflineTopicGetDesc", err)
 			sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 			return
 		}
@@ -582,9 +591,9 @@ func replyOfflineTopicGetDesc(sess *Session, msg *ClientComMessage) {
 		if stopic.Owner == msg.AsUser {
 			desc.DefaultAcs = &MsgDefaultAcsMode{
 				Auth: stopic.Access.Auth.String(),
-				Anon: stopic.Access.Anon.String()}
+				Anon: stopic.Access.Anon.String(),
+			}
 		}
-
 	} else {
 		// 'me' and p2p topics
 		uid := types.ZeroUid
@@ -603,7 +612,7 @@ func replyOfflineTopicGetDesc(sess *Session, msg *ClientComMessage) {
 		}
 
 		if uid.IsZero() {
-			log.Println("replyOfflineTopicGetDesc: malformed p2p topic name")
+			logs.Warn.Println("replyOfflineTopicGetDesc: malformed p2p topic name")
 			sess.queueOut(ErrMalformedReply(msg, now))
 			return
 		}
@@ -627,7 +636,7 @@ func replyOfflineTopicGetDesc(sess *Session, msg *ClientComMessage) {
 
 	sub, err := store.Subs.Get(topic, asUid)
 	if err != nil {
-		log.Println("replyOfflineTopicGetDesc:", err)
+		logs.Warn.Println("replyOfflineTopicGetDesc:", err)
 		sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 		return
 	}
@@ -638,11 +647,15 @@ func replyOfflineTopicGetDesc(sess *Session, msg *ClientComMessage) {
 		desc.Acs = &MsgAccessMode{
 			Want:  sub.ModeWant.String(),
 			Given: sub.ModeGiven.String(),
-			Mode:  (sub.ModeGiven & sub.ModeWant).String()}
+			Mode:  (sub.ModeGiven & sub.ModeWant).String(),
+		}
 	}
 
 	sess.queueOut(&ServerComMessage{
-		Meta: &MsgServerMeta{Id: msg.Id, Topic: msg.Original, Timestamp: &now, Desc: desc}})
+		Meta: &MsgServerMeta{
+			Id: msg.Id, Topic: msg.Original, Timestamp: &now, Desc: desc,
+		},
+	})
 }
 
 // replyOfflineTopicGetSub reads user's subscription from the database.
@@ -656,15 +669,20 @@ func replyOfflineTopicGetSub(sess *Session, msg *ClientComMessage) {
 		return
 	}
 
-	ssub, err := store.Subs.Get(msg.RcptTo, types.ParseUserId(msg.AsUser))
+	topicName := msg.RcptTo
+	if types.IsChannel(msg.Original) {
+		topicName = msg.Original
+	}
+
+	ssub, err := store.Subs.Get(topicName, types.ParseUserId(msg.AsUser))
 	if err != nil {
-		log.Println("replyOfflineTopicGetSub:", err)
+		logs.Warn.Println("replyOfflineTopicGetSub:", err)
 		sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 		return
 	}
 
 	if ssub == nil {
-		sess.queueOut(ErrNotFound(msg.Id, msg.Original, now, msg.Timestamp))
+		sess.queueOut(ErrNotFoundExplicitTs(msg.Id, msg.Original, now, msg.Timestamp))
 		return
 	}
 
@@ -674,7 +692,8 @@ func replyOfflineTopicGetSub(sess *Session, msg *ClientComMessage) {
 		sub.Acs = MsgAccessMode{
 			Want:  ssub.ModeWant.String(),
 			Given: ssub.ModeGiven.String(),
-			Mode:  (ssub.ModeGiven & ssub.ModeWant).String()}
+			Mode:  (ssub.ModeGiven & ssub.ModeWant).String(),
+		}
 		// Fnd is asymmetric: desc.private is a string, but sub.private is a []string.
 		if types.GetTopicCat(msg.RcptTo) != types.TopicCatFnd {
 			sub.Private = ssub.Private
@@ -686,10 +705,15 @@ func replyOfflineTopicGetSub(sess *Session, msg *ClientComMessage) {
 			sub.ReadSeqId = ssub.ReadSeqId
 			sub.RecvSeqId = ssub.RecvSeqId
 		}
+	} else {
+		sub.DeletedAt = ssub.DeletedAt
 	}
 
 	sess.queueOut(&ServerComMessage{
-		Meta: &MsgServerMeta{Id: msg.Id, Topic: msg.Original, Timestamp: &now, Sub: []MsgTopicSub{sub}}})
+		Meta: &MsgServerMeta{
+			Id: msg.Id, Topic: msg.Original, Timestamp: &now, Sub: []MsgTopicSub{sub},
+		},
+	})
 }
 
 // replyOfflineTopicSetSub updates Desc.Private and Sub.Mode when the topic is not loaded in memory.
@@ -710,15 +734,20 @@ func replyOfflineTopicSetSub(sess *Session, msg *ClientComMessage) {
 
 	asUid := types.ParseUserId(msg.AsUser)
 
-	sub, err := store.Subs.Get(msg.RcptTo, asUid)
+	topicName := msg.RcptTo
+	if types.IsChannel(msg.Original) {
+		topicName = msg.Original
+	}
+
+	sub, err := store.Subs.Get(topicName, asUid)
 	if err != nil {
-		log.Println("replyOfflineTopicSetSub get sub:", err)
+		logs.Warn.Println("replyOfflineTopicSetSub get sub:", err)
 		sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 		return
 	}
 
 	if sub == nil || sub.DeletedAt != nil {
-		sess.queueOut(ErrNotFound(msg.Id, msg.Original, now, msg.Timestamp))
+		sess.queueOut(ErrNotFoundExplicitTs(msg.Id, msg.Original, now, msg.Timestamp))
 		return
 	}
 
@@ -735,7 +764,7 @@ func replyOfflineTopicSetSub(sess *Session, msg *ClientComMessage) {
 	if msg.Set.Sub != nil && msg.Set.Sub.Mode != "" {
 		var modeWant types.AccessMode
 		if err = modeWant.UnmarshalText([]byte(msg.Set.Sub.Mode)); err != nil {
-			log.Println("replyOfflineTopicSetSub mode:", err)
+			logs.Warn.Println("replyOfflineTopicSetSub mode:", err)
 			sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 			return
 		}
@@ -760,17 +789,20 @@ func replyOfflineTopicSetSub(sess *Session, msg *ClientComMessage) {
 	}
 
 	if len(update) > 0 {
-		err = store.Subs.Update(msg.RcptTo, asUid, update, true)
+		err = store.Subs.Update(topicName, asUid, update)
 		if err != nil {
-			log.Println("replyOfflineTopicSetSub update:", err)
+			logs.Warn.Println("replyOfflineTopicSetSub update:", err)
 			sess.queueOut(decodeStoreErrorExplicitTs(err, msg.Id, msg.Original, now, msg.Timestamp, nil))
 		} else {
 			var params interface{}
 			if update["ModeWant"] != nil {
-				params = map[string]interface{}{"acs": MsgAccessMode{
-					Given: sub.ModeGiven.String(),
-					Want:  sub.ModeWant.String(),
-					Mode:  (sub.ModeGiven & sub.ModeWant).String()}}
+				params = map[string]interface{}{
+					"acs": MsgAccessMode{
+						Given: sub.ModeGiven.String(),
+						Want:  sub.ModeWant.String(),
+						Mode:  (sub.ModeGiven & sub.ModeWant).String(),
+					},
+				}
 			}
 			sess.queueOut(NoErrParamsReply(msg, now, params))
 		}
