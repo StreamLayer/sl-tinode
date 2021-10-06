@@ -266,8 +266,7 @@ message ClientNote {
 	InfoNote what = 2;
 	// Server-issued message ID being reported
 	int32 seq_id = 3;
-	map<string, bytes> head = 4;
-	bytes content = 5;
+	bytes content = 4;
 }
 
 message ClientMsg {

@@ -309,9 +309,8 @@ type MsgClientNote struct {
 	// Server-issued message ID being reported
 	SeqId int `json:"seq,omitempty"`
 	// Client's count of unread messages to report back to the server. Used in push notifications on iOS.
-	Unread  int                    `json:"unread,omitempty"`
-	Head    map[string]interface{} `json:"head,omitempty"`
-	Content interface{}            `json:"content"`
+	Unread  int         `json:"unread,omitempty"`
+	Content interface{} `json:"content,omitempty"`
 }
 
 // ClientComMessage is a wrapper for client messages.

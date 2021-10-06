@@ -1267,7 +1267,6 @@ func (s *Session) note(msg *ClientComMessage) {
 			SeqId: msg.Note.SeqId,
 		},
 		Data: &MsgServerData{
-			Head:    msg.Note.Head,
 			Content: msg.Note.Content,
 		},
 		RcptTo:    msg.RcptTo,

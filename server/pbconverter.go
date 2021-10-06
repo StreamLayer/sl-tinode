@@ -335,7 +335,6 @@ func pbCliSerialize(msg *ClientComMessage) *pbx.ClientMsg {
 				Topic:   msg.Note.Topic,
 				What:    pbInfoNoteWhatSerialize(msg.Note.What),
 				SeqId:   int32(msg.Note.SeqId),
-				Head:    interfaceMapToByteMap(msg.Note.Head),
 				Content: interfaceToBytes(msg.Note.Content),
 			},
 		}
