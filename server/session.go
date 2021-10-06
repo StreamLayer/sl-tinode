@@ -1251,6 +1251,10 @@ func (s *Session) note(msg *ClientComMessage) {
 		if msg.Note.SeqId <= 0 {
 			return
 		}
+	case "bypass":
+		if msg.Note.Content == nil {
+			return
+		}
 	default:
 		return
 	}
@@ -1261,6 +1265,10 @@ func (s *Session) note(msg *ClientComMessage) {
 			From:  msg.AsUser,
 			What:  msg.Note.What,
 			SeqId: msg.Note.SeqId,
+		},
+		Data: &MsgServerData{
+			Head:    msg.Note.Head,
+			Content: msg.Note.Content,
 		},
 		RcptTo:    msg.RcptTo,
 		AsUser:    msg.AsUser,

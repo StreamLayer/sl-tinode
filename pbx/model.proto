@@ -256,15 +256,17 @@ enum InfoNote {
 	READ = 0;
 	RECV = 1;
 	KP = 2;
+	BYPASS = 3;
 }
 
 // ClientNote is a client-generated notification for topic subscribers
 message ClientNote {
 	string topic = 1;
-	// what is being reported: "recv" - message received, "read" - message read, "kp" - typing notification
+	// what is being reported: "recv" - message received, "read" - message read, "kp" - typing notification, "bypass" - bypass msg to subs
 	InfoNote what = 2;
 	// Server-issued message ID being reported
 	int32 seq_id = 3;
+	ServerData msg = 4;
 }
 
 message ClientMsg {
