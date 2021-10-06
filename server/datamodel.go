@@ -304,12 +304,13 @@ type MsgClientDel struct {
 type MsgClientNote struct {
 	// There is no Id -- server will not akn {ping} packets, they are "fire and forget"
 	Topic string `json:"topic"`
-	// what is being reported: "recv" - message received, "read" - message read, "kp" - typing notification
+	// what is being reported: "recv" - message received, "read" - message read, "kp" - typing notification, "bypass" - bypass msg to subs
 	What string `json:"what"`
 	// Server-issued message ID being reported
 	SeqId int `json:"seq,omitempty"`
 	// Client's count of unread messages to report back to the server. Used in push notifications on iOS.
-	Unread int `json:"unread,omitempty"`
+	Unread  int         `json:"unread,omitempty"`
+	Content interface{} `json:"content,omitempty"`
 }
 
 // ClientComMessage is a wrapper for client messages.
