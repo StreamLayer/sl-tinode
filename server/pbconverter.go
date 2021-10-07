@@ -439,8 +439,9 @@ func pbCliDeserialize(pkt *pbx.ClientMsg) *ClientComMessage {
 		}
 	} else if note := pkt.GetNote(); note != nil {
 		msg.Note = &MsgClientNote{
-			Topic: note.GetTopic(),
-			SeqId: int(note.GetSeqId()),
+			Topic:   note.GetTopic(),
+			SeqId:   int(note.GetSeqId()),
+			Content: note.Content,
 		}
 		switch note.GetWhat() {
 		case pbx.InfoNote_READ:
