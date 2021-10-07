@@ -1253,9 +1253,9 @@ func (s *Session) note(msg *ClientComMessage) {
 			return
 		}
 	case "bypass":
-		if msg.Note.Content == nil {
-			return
-		}
+		// if msg.Note.Content == nil {
+		// 	return
+		// }
 	default:
 		return
 	}
