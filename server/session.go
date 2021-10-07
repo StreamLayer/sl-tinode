@@ -1242,6 +1242,7 @@ func (s *Session) note(msg *ClientComMessage) {
 		return
 	}
 
+	logs.Warn.Println("s.note: debug", msg.Note.What, msg.Note.Content)
 	switch msg.Note.What {
 	case "kp":
 		if msg.Note.SeqId != 0 {
