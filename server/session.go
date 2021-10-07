@@ -1260,6 +1260,38 @@ func (s *Session) note(msg *ClientComMessage) {
 		return
 	}
 
+	if msg.Note.What == "bypass" {
+		response := &ServerComMessage{
+			Info: &MsgServerInfo{
+				Topic: msg.Original,
+				From:  msg.AsUser,
+				What:  msg.Note.What,
+				SeqId: msg.Note.SeqId,
+			},
+			Data: &MsgServerData{
+				Content: msg.Note.Content,
+			},
+			RcptTo:    msg.RcptTo,
+			AsUser:    msg.AsUser,
+			Timestamp: msg.Timestamp,
+			SkipSid:   s.sid,
+			sess:      s,
+		}
+
+		if sub := s.getSub(msg.RcptTo); sub != nil {
+			// Pings can be sent to subscribed topics only
+			select {
+			case sub.broadcast <- response:
+			default:
+				// Reply with a 500 to the user.
+				s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
+				logs.Err.Println("s.note: sub.broacast channel full, topic ", msg.RcptTo, s.sid)
+			}
+		}
+
+		return
+	}
+
 	response := &ServerComMessage{
 		Info: &MsgServerInfo{
 			Topic: msg.Original,
