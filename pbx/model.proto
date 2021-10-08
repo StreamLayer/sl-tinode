@@ -433,6 +433,7 @@ message ServerInfo {
 	InfoNote what = 3;
 	int32 seq_id = 4;
 	string src = 5;
+	bytes content = 6;
 }
 
 // Cumulative message

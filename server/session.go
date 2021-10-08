@@ -1263,12 +1263,10 @@ func (s *Session) note(msg *ClientComMessage) {
 	if msg.Note.What == "bypass" {
 		response := &ServerComMessage{
 			Info: &MsgServerInfo{
-				Topic: msg.Original,
-				From:  msg.AsUser,
-				What:  msg.Note.What,
-				SeqId: msg.Note.SeqId,
-			},
-			Data: &MsgServerData{
+				Topic:   msg.Original,
+				From:    msg.AsUser,
+				What:    msg.Note.What,
+				SeqId:   msg.Note.SeqId,
 				Content: msg.Note.Content,
 			},
 			RcptTo:    msg.RcptTo,

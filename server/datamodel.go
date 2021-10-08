@@ -309,8 +309,8 @@ type MsgClientNote struct {
 	// Server-issued message ID being reported
 	SeqId int `json:"seq,omitempty"`
 	// Client's count of unread messages to report back to the server. Used in push notifications on iOS.
-	Unread  int         `json:"unread,omitempty"`
-	Content interface{} `json:"content,omitempty"`
+	Unread  int    `json:"unread,omitempty"`
+	Content []byte `json:"content,omitempty"`
 }
 
 // ClientComMessage is a wrapper for client messages.
@@ -748,6 +748,7 @@ type MsgServerInfo struct {
 
 	// When sending to 'me', skip sessions subscribed to this topic.
 	SkipTopic string `json:"-"`
+	Content   []byte `json:"content"` // bypass content
 }
 
 // Deep copy.

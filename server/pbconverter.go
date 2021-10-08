@@ -97,6 +97,7 @@ func pbServInfoSerialize(info *MsgServerInfo) *pbx.ServerMsg_Info {
 			FromUserId: info.From,
 			What:       pbInfoNoteWhatSerialize(info.What),
 			SeqId:      int32(info.SeqId),
+			Content:    info.Content,
 		},
 	}
 }
@@ -203,10 +204,11 @@ func pbServDeserialize(pkt *pbx.ServerMsg) *ServerComMessage {
 		}
 	} else if info := pkt.GetInfo(); info != nil {
 		msg.Info = &MsgServerInfo{
-			Topic: info.GetTopic(),
-			From:  info.GetFromUserId(),
-			What:  pbInfoNoteWhatDeserialize(info.GetWhat()),
-			SeqId: int(info.GetSeqId()),
+			Topic:   info.GetTopic(),
+			From:    info.GetFromUserId(),
+			Content: info.GetContent(),
+			What:    pbInfoNoteWhatDeserialize(info.GetWhat()),
+			SeqId:   int(info.GetSeqId()),
 		}
 	} else if meta := pkt.GetMeta(); meta != nil {
 		msg.Meta = &MsgServerMeta{
