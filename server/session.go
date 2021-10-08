@@ -1279,11 +1279,13 @@ func (s *Session) note(msg *ClientComMessage) {
 		}
 
 		if sub := s.getSub(msg.RcptTo); sub != nil {
+			logs.Warn.Println("s.note: sub not nil")
 			// Pings can be sent to subscribed topics only
 			select {
 			case sub.broadcast <- response:
 			default:
 				// Reply with a 500 to the user.
+				logs.Warn.Println("s.note: sub err")
 				s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
 				logs.Err.Println("s.note: sub.broacast channel full, topic ", msg.RcptTo, s.sid)
 			}
