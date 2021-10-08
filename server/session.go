@@ -1253,63 +1253,21 @@ func (s *Session) note(msg *ClientComMessage) {
 			return
 		}
 	case "bypass":
-		// if msg.Note.Content == nil {
-		// 	return
-		// }
+		if msg.Note.Content == nil {
+			return
+		}
 	default:
-		return
-	}
-
-	if msg.Note.What == "bypass" {
-		response := &ServerComMessage{
-			Info: &MsgServerInfo{
-				Topic:   msg.Original,
-				From:    msg.AsUser,
-				What:    msg.Note.What,
-				SeqId:   msg.Note.SeqId,
-				Content: msg.Note.Content,
-			},
-			RcptTo:    msg.RcptTo,
-			AsUser:    msg.AsUser,
-			Timestamp: msg.Timestamp,
-			SkipSid:   s.sid,
-			sess:      s,
-		}
-
-		select {
-		case globals.hub.route <- response:
-		default:
-			// Reply with a 500 to the user.
-			logs.Warn.Println("s.note: sub err")
-			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
-			logs.Err.Println("s.note: hub.route channel full", s.sid)
-		}
-		// if sub := s.getSub(msg.RcptTo); sub != nil {
-		// 	logs.Warn.Println("s.note: sub not nil")
-		// 	// Pings can be sent to subscribed topics only
-		// 	select {
-		// 	case sub.broadcast <- response:
-		// 	default:
-		// 		// Reply with a 500 to the user.
-		// 		logs.Warn.Println("s.note: sub err")
-		// 		s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
-		// 		logs.Err.Println("s.note: sub.broacast channel full, topic ", msg.RcptTo, s.sid)
-		// 	}
-		// }
-
 		return
 	}
 
 	response := &ServerComMessage{
 		Info: &MsgServerInfo{
-			Topic: msg.Original,
-			From:  msg.AsUser,
-			What:  msg.Note.What,
-			SeqId: msg.Note.SeqId,
+			Topic:   msg.Original,
+			From:    msg.AsUser,
+			What:    msg.Note.What,
+			SeqId:   msg.Note.SeqId,
+			Content: msg.Note.Content,
 		},
-		// Data: &MsgServerData{
-		// 	Content: msg.Note.Content,
-		// },
 		RcptTo:    msg.RcptTo,
 		AsUser:    msg.AsUser,
 		Timestamp: msg.Timestamp,
