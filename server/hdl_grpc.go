@@ -170,12 +170,14 @@ func serveGrpc(addr string, kaEnabled bool, tlsConf *tls.Config) (*grpc.Server, 
 		opts = append(opts, grpc.KeepaliveEnforcementPolicy(kepConfig))
 
 		kpConfig := keepalive.ServerParameters{
-			Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
-			Timeout: 20 * time.Second, // Wait 20 second for the ping ack before assuming the connection is dead
+			Time:              20 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
+			Timeout:           5 * time.Second,  // Wait 20 second for the ping ack before assuming the connection is dead
+			MaxConnectionIdle: 10 * time.Second,
 		}
 		opts = append(opts, grpc.KeepaliveParams(kpConfig))
 	}
 
+	logs.Info.Printf("gRPC server opts %o", opts)
 	srv := grpc.NewServer(opts...)
 	pbx.RegisterNodeServer(srv, &grpcNodeServer{})
 	logs.Info.Printf("gRPC/%s%s server is registered at [%s]", grpc.Version, secure, addr)
