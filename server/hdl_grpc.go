@@ -177,7 +177,7 @@ func serveGrpc(addr string, kaEnabled bool, tlsConf *tls.Config) (*grpc.Server, 
 		opts = append(opts, grpc.KeepaliveParams(kpConfig))
 	}
 
-	logs.Info.Printf("gRPC server opts %o", opts)
+	logs.Info.Printf("gRPC server opts %v", opts)
 	srv := grpc.NewServer(opts...)
 	pbx.RegisterNodeServer(srv, &grpcNodeServer{})
 	logs.Info.Printf("gRPC/%s%s server is registered at [%s]", grpc.Version, secure, addr)
