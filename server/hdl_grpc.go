@@ -163,6 +163,8 @@ func serveGrpc(addr string, kaEnabled bool, tlsConf *tls.Config) (*grpc.Server, 
 	}
 
 	if kaEnabled {
+		logs.Info.Printf("gRPC server kaEnabled")
+
 		kepConfig := keepalive.EnforcementPolicy{
 			MinTime:             1 * time.Second, // If a client pings more than once every second, terminate the connection
 			PermitWithoutStream: true,            // Allow pings even when there are no active streams
@@ -177,7 +179,6 @@ func serveGrpc(addr string, kaEnabled bool, tlsConf *tls.Config) (*grpc.Server, 
 		opts = append(opts, grpc.KeepaliveParams(kpConfig))
 	}
 
-	logs.Info.Printf("gRPC server opts %v", opts)
 	srv := grpc.NewServer(opts...)
 	pbx.RegisterNodeServer(srv, &grpcNodeServer{})
 	logs.Info.Printf("gRPC/%s%s server is registered at [%s]", grpc.Version, secure, addr)
