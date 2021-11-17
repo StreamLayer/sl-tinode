@@ -11,11 +11,6 @@ releasepath="./docker/tinode/releases"
 repository="gcr.io/peak-orbit-214114"
 
 export GOPATH=`go env GOPATH`
-export GRPC_ARG_KEEPALIVE_TIME_MS=10000
-export GRPC_ARG_KEEPALIVE_TIMEOUT_MS=20000
-export GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS=1
-export GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS=10000
-export GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS=1
 
 for line in $@; do
   eval "$line"

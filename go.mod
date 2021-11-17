@@ -18,13 +18,12 @@ require (
 	github.com/tinode/jsonco v1.0.0
 	github.com/tinode/snowflake v1.0.0
 	go.mongodb.org/mongo-driver v1.7.0
-	golang.org/x/crypto v0.0.0-20200320181102-891825fb96df
-	golang.org/x/net v0.0.0-20200320220750-118fecf932d8
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
+	golang.org/x/net v0.0.0-20200822124328-c89045814202
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
-	golang.org/x/sys v0.0.0-20200202164722-d101bd2416d5 // indirect
 	golang.org/x/text v0.3.5
 	google.golang.org/api v0.20.0
-	google.golang.org/grpc v1.28.0
+	google.golang.org/grpc v1.42.0
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/rethinkdb/rethinkdb-go.v6 v6.2.1
 )
