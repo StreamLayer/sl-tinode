@@ -171,6 +171,13 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 		return
 	}
 
+	if msg.Extra != nil && len(msg.Extra.Attachments) > 0 {
+		if err := store.Files.LinkAttachments(user.Uid().UserId(), types.ZeroUid, msg.Extra.Attachments); err != nil {
+			logs.Warn.Println("create user: failed to link avatar attachment", err, s.sid)
+			// This is not a critical error, continue execution.
+		}
+	}
+
 	var reply *ServerComMessage
 	if msg.Acc.Login {
 		// Process user's login request.
@@ -184,6 +191,7 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 			"authlvl": rec.AuthLevel.String(),
 		}
 	}
+
 	params := reply.Ctrl.Params.(map[string]interface{})
 	params["desc"] = &MsgTopicDesc{
 		CreatedAt: &user.CreatedAt,
@@ -562,7 +570,7 @@ func changeUserState(s *Session, uid types.Uid, user *types.User, msg *ClientCom
 	}
 
 	// Update state of all loaded in memory user's p2p & grp-owner topics.
-	globals.hub.meta <- &metaReq{forUser: uid, state: state, sess: s}
+	globals.hub.userStatus <- &userStatusReq{forUser: uid, state: state}
 	user.State = state
 
 	return true, err

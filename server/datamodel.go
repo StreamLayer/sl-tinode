@@ -62,9 +62,10 @@ type MsgSetSub struct {
 
 // MsgSetDesc is a C2S in set.what == "desc", acc, sub message.
 type MsgSetDesc struct {
-	DefaultAcs *MsgDefaultAcsMode `json:"defacs,omitempty"` // default access mode
-	Public     interface{}        `json:"public,omitempty"`
-	Private    interface{}        `json:"private,omitempty"` // Per-subscription private data
+	DefaultAcs *MsgDefaultAcsMode `json:"defacs,omitempty"`  // default access mode
+	Public     interface{}        `json:"public,omitempty"`  // description of the user or topic
+	Trusted    interface{}        `json:"trusted,omitempty"` // trusted (system-provided) user or topic data
+	Private    interface{}        `json:"private,omitempty"` // per-subscription private data
 }
 
 // MsgCredClient is an account credential such as email or phone number.
@@ -79,9 +80,9 @@ type MsgCredClient struct {
 	Params map[string]interface{} `json:"params,omitempty"`
 }
 
-// MsgSetQuery is an update to topic metadata: Desc, subscriptions, or tags.
+// MsgSetQuery is an update to topic or user metadata: description, subscriptions, tags, credentials.
 type MsgSetQuery struct {
-	// Topic metadata, new topic & new subscriptions only
+	// Topic/user description, new object & new subscriptions only
 	Desc *MsgSetDesc `json:"desc,omitempty"`
 	// Subscription parameters
 	Sub *MsgSetSub `json:"sub,omitempty"`
@@ -130,7 +131,7 @@ type MsgClientAcc struct {
 	State string `json:"status,omitempty"`
 	// Authentication level of the user when UserID is set and not equal to the current user.
 	// Either "", "auth" or "anon". Default: ""
-	AuthLevel string
+	AuthLevel string `json:"authlevel,omitempty"`
 	// Authentication token for resetting the password and maybe other one-time actions.
 	Token []byte `json:"token,omitempty"`
 	// The initial authentication scheme the account can use
@@ -313,6 +314,16 @@ type MsgClientNote struct {
 	Content []byte `json:"content,omitempty"`
 }
 
+// MsgClientExtra is not a stand-alone message but extra data which augments the main payload.
+type MsgClientExtra struct {
+	// Array of out-of-band attachments which have to be exempted from GC.
+	Attachments []string `json:"attachments,omitempty"`
+	// Alternative user ID set by the root user (obo = On Behalf Of).
+	AsUser string `json:"obo,omitempty"`
+	// Altered authentication level set by the root user.
+	AuthLevel string `json:"authlevel,omitempty"`
+}
+
 // ClientComMessage is a wrapper for client messages.
 type ClientComMessage struct {
 	Hi    *MsgClientHi    `json:"hi"`
@@ -325,6 +336,8 @@ type ClientComMessage struct {
 	Set   *MsgClientSet   `json:"set"`
 	Del   *MsgClientDel   `json:"del"`
 	Note  *MsgClientNote  `json:"note"`
+	// Optional data.
+	Extra *MsgClientExtra `json:"extra"`
 
 	// Internal fields, routed only within the cluster.
 
@@ -344,6 +357,10 @@ type ClientComMessage struct {
 	Timestamp time.Time `json:"-"`
 
 	OrganizationId string `json:"-"`
+	// Originating session to send an aknowledgement to.
+	sess *Session
+	// The message is initialized (true) as opposite to being used as a wrapper for session.
+	init bool
 }
 
 /****************************************************************
@@ -409,6 +426,9 @@ type MsgTopicDesc struct {
 	// If the group topic is online.
 	Online bool `json:"online,omitempty"`
 
+	// If the topic can be accessed as a channel
+	IsChan bool `json:"chan,omitempty"`
+
 	// P2P other user's last online timestamp & user agent
 	LastSeen *MsgLastSeenInfo `json:"seen,omitempty"`
 
@@ -420,8 +440,9 @@ type MsgTopicDesc struct {
 	ReadSeqId int `json:"read,omitempty"`
 	RecvSeqId int `json:"recv,omitempty"`
 	// Id of the last delete operation as seen by the requesting user
-	DelId  int         `json:"clear,omitempty"`
-	Public interface{} `json:"public,omitempty"`
+	DelId   int         `json:"clear,omitempty"`
+	Public  interface{} `json:"public,omitempty"`
+	Trusted interface{} `json:"trusted,omitempty"`
 	// Per-subscription private data
 	Private interface{} `json:"private,omitempty"`
 }
@@ -449,6 +470,9 @@ func (src *MsgTopicDesc) describe() string {
 	}
 	if src.Public != nil {
 		s += " pub='...'"
+	}
+	if src.Trusted != nil {
+		s += " trst='...'"
 	}
 	if src.Private != nil {
 		s += " priv='...'"
@@ -479,6 +503,8 @@ type MsgTopicSub struct {
 	RecvSeqId int `json:"recv,omitempty"`
 	// Topic's public data
 	Public interface{} `json:"public,omitempty"`
+	// Topic's trusted public data
+	Trusted interface{} `json:"trusted,omitempty"`
 	// User's own private data per topic
 	Private interface{} `json:"private,omitempty"`
 
@@ -522,6 +548,9 @@ func (src *MsgTopicSub) describe() string {
 	}
 	if src.Public != nil {
 		s += " pub='...'"
+	}
+	if src.Trusted != nil {
+		s += " trst='...'"
 	}
 	if src.Private != nil {
 		s += " priv='...'"

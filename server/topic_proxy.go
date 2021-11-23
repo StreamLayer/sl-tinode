@@ -23,8 +23,8 @@ func (t *Topic) runProxy(hub *Hub) {
 		case join := <-t.reg:
 			// Request to add a connection to this topic
 			if t.isInactive() {
-				join.sess.queueOut(ErrLockedReply(join.pkt, types.TimeNow()))
-			} else if err := globals.cluster.routeToTopicMaster(ProxyReqJoin, join.pkt, t.name, join.sess); err != nil {
+				join.sess.queueOut(ErrLockedReply(join, types.TimeNow()))
+			} else if err := globals.cluster.routeToTopicMaster(ProxyReqJoin, join, t.name, join.sess); err != nil {
 				// Response (ctrl message) will be handled when it's received via the proxy channel.
 				logs.Warn.Println("proxy topic: route join request from proxy to master failed:", err)
 			}
@@ -32,24 +32,28 @@ func (t *Topic) runProxy(hub *Hub) {
 				join.sess.inflightReqs.Done()
 			}
 
-		case leave := <-t.unreg:
-			if !t.handleProxyLeaveRequest(leave, killTimer) {
-				logs.Warn.Println("Failed to update proxy topic state for leave request", leave.sess.sid)
+		case msg := <-t.unreg:
+			if !t.handleProxyLeaveRequest(msg, killTimer) {
+				logs.Warn.Println("Failed to update proxy topic state for leave request", msg.sess.sid)
 			}
-			if leave.pkt != nil && leave.sess.inflightReqs != nil {
+			if msg.init && msg.sess.inflightReqs != nil {
 				// If it's a client initiated request.
-				leave.sess.inflightReqs.Done()
+				msg.sess.inflightReqs.Done()
 			}
 
-		case msg := <-t.broadcast:
+		case msg := <-t.clientMsg:
 			// Content message intended for broadcasting to recipients
 			if err := globals.cluster.routeToTopicMaster(ProxyReqBroadcast, msg, t.name, msg.sess); err != nil {
 				logs.Warn.Println("proxy topic: route broadcast request from proxy to master failed:", err)
 			}
 
-		case meta := <-t.meta:
+		case msg := <-t.serverMsg:
+			// FIXME: should something be done here?
+			logs.Err.Printf("ERROR!!! Unexpected server-side message in proxy topic %#v", msg)
+
+		case msg := <-t.meta:
 			// Request to get/set topic metadata
-			if err := globals.cluster.routeToTopicMaster(ProxyReqMeta, meta.pkt, t.name, meta.sess); err != nil {
+			if err := globals.cluster.routeToTopicMaster(ProxyReqMeta, msg, t.name, msg.sess); err != nil {
 				logs.Warn.Println("proxy topic: route meta request from proxy to master failed:", err)
 			}
 
@@ -103,15 +107,15 @@ func (t *Topic) runProxy(hub *Hub) {
 // Takes a session leave request, forwards it to the topic master and
 // modifies the local state accordingly.
 // Returns whether the operation was successful.
-func (t *Topic) handleProxyLeaveRequest(leave *sessionLeave, killTimer *time.Timer) bool {
+func (t *Topic) handleProxyLeaveRequest(msg *ClientComMessage, killTimer *time.Timer) bool {
 	// Detach session from topic; session may continue to function.
 	var asUid types.Uid
-	if leave.pkt != nil {
-		asUid = types.ParseUserId(leave.pkt.AsUser)
+	if msg.init {
+		asUid = types.ParseUserId(msg.AsUser)
 	}
 
 	if asUid.IsZero() {
-		if pssd, ok := t.sessions[leave.sess]; ok {
+		if pssd, ok := t.sessions[msg.sess]; ok {
 			asUid = pssd.uid
 		} else {
 			logs.Warn.Println("proxy topic: leave request sent for unknown session")
@@ -121,20 +125,17 @@ func (t *Topic) handleProxyLeaveRequest(leave *sessionLeave, killTimer *time.Tim
 	// Remove the session from the topic without waiting for a response from the master node
 	// because by the time the response arrives this session may be already gone from the session store
 	// and we won't be able to find and remove it by its sid.
-	_, result := t.remSession(leave.sess, asUid)
-	var pkt *ClientComMessage
-	if leave.pkt == nil {
+	_, result := t.remSession(msg.sess, asUid)
+	if !msg.init {
 		// Explicitly specify the uid because the master multiplex session needs to know which
 		// of its multiple hosted sessions to delete.
-		pkt = &ClientComMessage{
-			AsUser: asUid.UserId(),
-			Leave:  &MsgClientLeave{},
-		}
-	} else {
-		pkt = leave.pkt
+		msg.AsUser = asUid.UserId()
+		msg.Leave = &MsgClientLeave{}
+		msg.init = true
 	}
-	if err := globals.cluster.routeToTopicMaster(ProxyReqLeave, pkt, t.name, leave.sess); err != nil {
-		logs.Warn.Println("proxy topic: route broadcast request from proxy to master failed:", err)
+
+	if err := globals.cluster.routeToTopicMaster(ProxyReqLeave, msg, t.name, msg.sess); err != nil {
+		logs.Warn.Println("proxy topic: route leave request from proxy to master failed:", err)
 	}
 	if len(t.sessions) == 0 {
 		// No more sessions attached. Start the countdown.
@@ -143,7 +144,7 @@ func (t *Topic) handleProxyLeaveRequest(leave *sessionLeave, killTimer *time.Tim
 	return result
 }
 
-// Proxy topic handler of a master topic response to earlier request.
+// proxyMasterResponse at proxy topic processes a master topic response to an earlier request.
 func (t *Topic) proxyMasterResponse(msg *ClusterResp, killTimer *time.Timer) {
 	// Kills topic after a period of inactivity.
 	keepAlive := idleProxyTopicTimeout
@@ -158,7 +159,7 @@ func (t *Topic) proxyMasterResponse(msg *ClusterResp, killTimer *time.Timer) {
 		switch {
 		case msg.SrvMsg.Pres != nil || msg.SrvMsg.Data != nil || msg.SrvMsg.Info != nil:
 			// Regular broadcast.
-			t.handleBroadcast(msg.SrvMsg)
+			t.handleProxyBroadcast(msg.SrvMsg)
 		case msg.SrvMsg.Ctrl != nil:
 			// Ctrl broadcast. E.g. for user eviction.
 			t.proxyCtrlBroadcast(msg.SrvMsg)
@@ -183,7 +184,7 @@ func (t *Topic) proxyMasterResponse(msg *ClusterResp, killTimer *time.Timer) {
 						// Successful subscriptions.
 						t.addSession(session, msg.SrvMsg.uid, types.IsChannel(msg.SrvMsg.Ctrl.Topic))
 						session.addSub(t.name, &Subscription{
-							broadcast: t.broadcast,
+							broadcast: t.clientMsg,
 							done:      t.unreg,
 							meta:      t.meta,
 							supd:      t.supd,
@@ -220,6 +221,20 @@ func (t *Topic) proxyMasterResponse(msg *ClusterResp, killTimer *time.Timer) {
 			logs.Err.Println("topic proxy: timeout")
 		}
 	}
+}
+
+// handleProxyBroadcast broadcasts a Data, Info or Pres message to sessions attached to this proxy topic.
+func (t *Topic) handleProxyBroadcast(msg *ServerComMessage) {
+	if t.isInactive() {
+		// Ignore broadcast - topic is paused or being deleted.
+		return
+	}
+
+	if msg.Data != nil {
+		t.lastID = msg.Data.SeqId
+	}
+
+	t.broadcastToSessions(msg)
 }
 
 // proxyCtrlBroadcast broadcasts a ctrl command to certain sessions attached to this proxy topic.

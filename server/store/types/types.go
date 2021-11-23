@@ -330,6 +330,19 @@ func ParseP2P(p2p string) (uid1, uid2 Uid, err error) {
 	return
 }
 
+// P2PNameForUser takes a user ID and a full name of a P2P topic and generates the name of the
+// P2P topic as it should be seen by the given user.
+func P2PNameForUser(uid Uid, p2p string) (string, error) {
+	uid1, uid2, err := ParseP2P(p2p)
+	if err != nil {
+		return "", err
+	}
+	if uid.Compare(uid1) == 0 {
+		return uid2.UserId(), nil
+	}
+	return uid1.UserId(), nil
+}
+
 // ObjHeader is the header shared by all stored objects.
 type ObjHeader struct {
 	// using string to get around rethinkdb's problems with uint64;
@@ -358,6 +371,9 @@ func (h *ObjHeader) SetUid(uid Uid) {
 func TimeNow() time.Time {
 	return time.Now().UTC().Round(time.Millisecond)
 }
+
+// TimeFormatRFC3339 is a format string for writing timestamps as RFC3339.
+const TimeFormatRFC3339 = "2006-01-02T15:04:05.999"
 
 // InitTimes initializes time.Time variables in the header to current time.
 func (h *ObjHeader) InitTimes() {
@@ -492,7 +508,8 @@ type User struct {
 	// User agent provided when accessing the topic last time
 	UserAgent string
 
-	Public interface{}
+	Public  interface{}
+	Trusted interface{}
 
 	// Unique indexed tags (email, phone) for finding this user. Stored on the
 	// 'users' as well as indexed in 'tagunique'
@@ -890,6 +907,8 @@ type Subscription struct {
 	// Deserialized public value from topic or user (depends on context)
 	// In case of P2P topics this is the Public value of the other user.
 	public interface{}
+	// In case of P2P topics this is the Trusted value of the other user.
+	trusted interface{}
 	// deserialized SeqID from user or topic
 	seqId int
 	// Deserialized TouchedAt from topic
@@ -908,14 +927,24 @@ type Subscription struct {
 	CreatedAt time.Time `bson:",omitempty"`
 }
 
-// SetPublic assigns to public, otherwise not accessible from outside the package.
+// SetPublic assigns a value to `public`, otherwise not accessible from outside the package.
 func (s *Subscription) SetPublic(pub interface{}) {
 	s.public = pub
 }
 
-// GetPublic reads value of public.
+// GetPublic reads value of `public`.
 func (s *Subscription) GetPublic() interface{} {
 	return s.public
+}
+
+// SetTrusted assigns a value to `trusted`, otherwise not accessible from outside the package.
+func (s *Subscription) SetTrusted(tstd interface{}) {
+	s.trusted = tstd
+}
+
+// GetTrusted reads value of `trusted`.
+func (s *Subscription) GetTrusted() interface{} {
+	return s.trusted
 }
 
 // SetWith sets other user for P2P subscriptions.
@@ -938,10 +967,14 @@ func (s *Subscription) SetTouchedAt(touchedAt time.Time) {
 	if touchedAt.After(s.touchedAt) {
 		s.touchedAt = touchedAt
 	}
+}
 
-	if s.touchedAt.Before(s.UpdatedAt) {
-		s.touchedAt = s.UpdatedAt
+// LastModified returns the greater of either TouchedAt or UpdatedAt.
+func (s *Subscription) LastModified() time.Time {
+	if s.UpdatedAt.Before(s.touchedAt) {
+		return s.touchedAt
 	}
+	return s.UpdatedAt
 }
 
 // GetSeqId returns seqId.
@@ -1047,7 +1080,8 @@ type Topic struct {
 	// If messages were deleted, sequential id of the last operation to delete them
 	DelId int
 
-	Public interface{}
+	Public  interface{}
+	Trusted interface{}
 
 	// Indexed tags for finding this topic.
 	Tags StringSlice
@@ -1293,6 +1327,8 @@ const (
 	UploadCompleted
 	// UploadFailed indicates that the upload has failed.
 	UploadFailed
+	// UploadDeleted indicates that the upload is no longer needed and can be deleted.
+	UploadDeleted
 )
 
 // FileDef is a stored record of a file upload

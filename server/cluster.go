@@ -490,14 +490,14 @@ func (c *Cluster) TopicMaster(msg *ClusterReq, rejected *bool) error {
 		}
 	}
 
+	if msg.CliMsg != nil {
+		msg.CliMsg.sess = sess
+	}
+
 	switch msg.ReqType {
 	case ProxyReqJoin:
-		join := &sessionJoin{
-			pkt:  msg.CliMsg,
-			sess: sess,
-		}
 		select {
-		case globals.hub.join <- join:
+		case globals.hub.join <- msg.CliMsg:
 		default:
 			// Reply with a 500 to the user.
 			sess.queueOut(ErrUnknownReply(msg.CliMsg, msg.CliMsg.Timestamp))
@@ -507,10 +507,7 @@ func (c *Cluster) TopicMaster(msg *ClusterReq, rejected *bool) error {
 
 	case ProxyReqLeave:
 		if t := globals.hub.topicGet(msg.RcptTo); t != nil {
-			t.unreg <- &sessionLeave{
-				pkt:  msg.CliMsg,
-				sess: sess,
-			}
+			t.unreg <- msg.CliMsg
 		} else {
 			logs.Warn.Println("cluster: leave request for unknown topic", msg.RcptTo)
 		}
@@ -518,10 +515,7 @@ func (c *Cluster) TopicMaster(msg *ClusterReq, rejected *bool) error {
 	case ProxyReqMeta:
 		if t := globals.hub.topicGet(msg.RcptTo); t != nil {
 			select {
-			case t.meta <- &metaReq{
-				pkt:  msg.CliMsg,
-				sess: sess,
-			}:
+			case t.meta <- msg.CliMsg:
 			default:
 				sess.queueOut(ErrUnknownReply(msg.CliMsg, msg.CliMsg.Timestamp))
 				logs.Warn.Println("cluster: meta req failed - topic.meta queue full, topic ", msg.CliMsg.RcptTo,
@@ -532,15 +526,14 @@ func (c *Cluster) TopicMaster(msg *ClusterReq, rejected *bool) error {
 		}
 
 	case ProxyReqBroadcast:
-		// sess could be nil
-		msg.SrvMsg.sess = sess
 		select {
-		case globals.hub.route <- msg.SrvMsg:
+		case globals.hub.routeCli <- msg.CliMsg:
 		default:
 			logs.Err.Println("cluster: route req failed - hub.route queue full")
 		}
 
 	case ProxyReqBgSession, ProxyReqMeUserAgent:
+		// sess could be nil
 		if t := globals.hub.topicGet(msg.RcptTo); t != nil {
 			if t.supd == nil {
 				logs.Err.Panicln("cluster: invalid topic category in session update", t.name, msg.ReqType)
@@ -601,7 +594,7 @@ func (c *Cluster) Route(msg *ClusterRoute, rejected *bool) error {
 		*rejected = true
 		return nil
 	}
-	globals.hub.route <- msg.SrvMsg
+	globals.hub.routeSrv <- msg.SrvMsg
 	return nil
 }
 
@@ -777,7 +770,7 @@ func (c *Cluster) isPartitioned() bool {
 	return result
 }
 
-func (c *Cluster) makeClusterReq(reqType ProxyReqType, payload interface{}, topic string, sess *Session) *ClusterReq {
+func (c *Cluster) makeClusterReq(reqType ProxyReqType, msg *ClientComMessage, topic string, sess *Session) *ClusterReq {
 	req := &ClusterReq{
 		Node:        c.thisNodeName,
 		Signature:   c.ring.Signature(),
@@ -788,22 +781,9 @@ func (c *Cluster) makeClusterReq(reqType ProxyReqType, payload interface{}, topi
 
 	var uid types.Uid
 
-	switch pl := payload.(type) {
-	case *ClientComMessage:
-		if pl != nil {
-			// See here why pl could be nil even if we have an explicit nil case:
-			// https://golang.org/doc/faq#nil_error
-			req.CliMsg = pl
-			uid = types.ParseUserId(req.CliMsg.AsUser)
-		}
-	case *ServerComMessage:
-		if pl != nil {
-			req.SrvMsg = pl
-			uid = types.ParseUserId(req.SrvMsg.AsUser)
-		}
-	case nil:
-	default:
-		panic("cluster: unknown payload in makeClusterReq")
+	if msg != nil {
+		req.CliMsg = msg
+		uid = types.ParseUserId(req.CliMsg.AsUser)
 	}
 
 	if sess != nil {
@@ -829,7 +809,7 @@ func (c *Cluster) makeClusterReq(reqType ProxyReqType, payload interface{}, topi
 }
 
 // Forward client request message from the Topic Proxy to the Topic Master (cluster node which owns the topic).
-func (c *Cluster) routeToTopicMaster(reqType ProxyReqType, payload interface{}, topic string, sess *Session) error {
+func (c *Cluster) routeToTopicMaster(reqType ProxyReqType, msg *ClientComMessage, topic string, sess *Session) error {
 	if c == nil {
 		// Cluster may be nil due to shutdown.
 		return nil
@@ -847,7 +827,7 @@ func (c *Cluster) routeToTopicMaster(reqType ProxyReqType, payload interface{}, 
 		return errors.New("node for topic not found")
 	}
 
-	req := c.makeClusterReq(reqType, payload, topic, sess)
+	req := c.makeClusterReq(reqType, msg, topic, sess)
 	return n.proxyToMaster(req)
 }
 
@@ -1081,7 +1061,7 @@ func (c *Cluster) invalidateProxySubs(forNode string) {
 	globals.hub.topics.Range(func(_, v interface{}) bool {
 		topic := v.(*Topic)
 		if !topic.isProxy {
-			// Topic either isn't a proxy.
+			// Topic isn't a proxy.
 			return true
 		}
 		if forNode == "" {
@@ -1143,6 +1123,7 @@ func (sess *Session) clusterWriteLoop(forTopic string) {
 		if terminate {
 			sess.closeRPC()
 			globals.sessionStore.Delete(sess)
+			sess.inflightReqs = nil
 			sess.unsubAll()
 		}
 	}()

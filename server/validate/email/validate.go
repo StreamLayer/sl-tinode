@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	textt "text/template"
-	"time"
 
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
@@ -42,6 +41,8 @@ type validator struct {
 	Login string `json:"login"`
 	// Password to use for SMTP authentication.
 	SenderPassword string `json:"sender_password"`
+	// Authentication mechanism to use, optional. One of "login", "md5", "plain" (default).
+	AuthMechanism string `json:"auth_mechanism"`
 	// Optional response which bypasses the validation.
 	DebugResponse string `json:"debug_response"`
 	// Number of validation attempts before email is locked.
@@ -86,16 +87,17 @@ const (
 	emailBodyHTML  = "body_html"
 )
 
-func resolveTemplatePath(path string) string {
-	// If a relative path is provided, try to resolve it relative to the exec file location,
-	// not whatever directory the user is in.
-	if !filepath.IsAbs(path) {
-		basepath, err := os.Executable()
-		if err == nil {
-			path = filepath.Join(filepath.Dir(basepath), path)
-		}
+func resolveTemplatePath(path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return path, nil
 	}
-	return path
+
+	curwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Clean(filepath.Join(curwd, path)), nil
 }
 
 func readTemplateFile(pathTempl *textt.Template, lang string) (*textt.Template, string, error) {
@@ -119,6 +121,30 @@ func isTemplateValid(templ *textt.Template) error {
 		return fmt.Errorf("template invalid: neither of '%s', '%s' is found", emailBodyPlain, emailBodyHTML)
 	}
 	return nil
+}
+
+type loginAuth struct {
+	username, password []byte
+}
+
+// Start begins an authentication with a server. Exported only to satisfy the interface definition.
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	return "LOGIN", []byte(a.username), nil
+}
+
+// Next continues the authentication. Exported only to satisfy the interface definition.
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if more {
+		switch strings.ToLower(string(fromServer)) {
+		case "username:":
+			return a.username, nil
+		case "password:":
+			return a.password, nil
+		default:
+			return nil, fmt.Errorf("LOGIN AUTH unknown server response '%s'", string(fromServer))
+		}
+	}
+	return nil, nil
 }
 
 type emailContent struct {
@@ -170,12 +196,28 @@ func (v *validator) Init(jsonconf string) error {
 
 	// Enable auth if login is provided.
 	if v.Login != "" {
-		v.auth = smtp.PlainAuth("", v.Login, v.SenderPassword, v.SMTPAddr)
+		mechanism := strings.ToLower(v.AuthMechanism)
+		switch mechanism {
+		case "cram-md5":
+			v.auth = smtp.CRAMMD5Auth(v.Login, v.SenderPassword)
+		case "login":
+			v.auth = &loginAuth{[]byte(v.Login), []byte(v.SenderPassword)}
+		case "", "plain":
+			v.auth = smtp.PlainAuth("", v.Login, v.SenderPassword, v.SMTPAddr)
+		default:
+			return errors.New("unknown auth_mechanism")
+		}
 	}
 
-	// Optionally resolve paths against the location of this executable file.
-	v.ValidationTemplFile = resolveTemplatePath(v.ValidationTemplFile)
-	v.ResetTemplFile = resolveTemplatePath(v.ResetTemplFile)
+	// Optionally resolve paths.
+	v.ValidationTemplFile, err = resolveTemplatePath(v.ValidationTemplFile)
+	if err != nil {
+		return err
+	}
+	v.ResetTemplFile, err = resolveTemplatePath(v.ResetTemplFile)
+	if err != nil {
+		return err
+	}
 
 	// Paths to templates could be templates themselves: they may be language-dependent.
 	var validationPathTempl, resetPathTempl *textt.Template
@@ -235,9 +277,6 @@ func (v *validator) Init(jsonconf string) error {
 			return fmt.Errorf("parsing %s: %w", path, err)
 		}
 	}
-
-	// Initialize random number generator.
-	rand.Seed(time.Now().UnixNano())
 
 	hostUrl, err := url.Parse(v.HostUrl)
 	if err != nil {
@@ -322,7 +361,8 @@ func (v *validator) Request(user t.Uid, email, lang, resp string, tmpToken []byt
 	token := make([]byte, base64.URLEncoding.EncodedLen(len(tmpToken)))
 	base64.URLEncoding.Encode(token, tmpToken)
 
-	// Generate expected response as a random numeric string between 0 and 999999
+	// Generate expected response as a random numeric string between 0 and 999999.
+	// The PRNG is already initialized in main.go. No need to initialize it here again.
 	resp = strconv.FormatInt(int64(rand.Intn(maxCodeValue)), 10)
 	resp = strings.Repeat("0", codeLength-len(resp)) + resp
 

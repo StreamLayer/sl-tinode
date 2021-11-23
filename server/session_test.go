@@ -133,7 +133,7 @@ func TestDispatchUnsupportedVersion(t *testing.T) {
 
 func TestDispatchLogin(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	ss := mock_store.NewMockStoreInterface(ctrl)
+	ss := mock_store.NewMockPersistentStorageInterface(ctrl)
 	aa := mock_auth.NewMockAuthHandler(ctrl)
 
 	uid := types.Uid(1)
@@ -224,7 +224,7 @@ func TestDispatchSubscribe(t *testing.T) {
 	go s.testWriteLoop(&r, &wg)
 
 	hub := &Hub{
-		join: make(chan *sessionJoin, 10),
+		join: make(chan *ClientComMessage, 10),
 	}
 	globals.hub = hub
 
@@ -255,7 +255,7 @@ func TestDispatchSubscribe(t *testing.T) {
 		if join.sess != s {
 			t.Error("Hub.join request: sess field expected to be the session under test.")
 		}
-		if join.pkt != msg {
+		if join != msg {
 			t.Error("Hub.join request: subscribe message expected to be the original subscribe message.")
 		}
 	} else {
@@ -314,7 +314,7 @@ func TestDispatchSubscribeJoinChannelFull(t *testing.T) {
 
 	hub := &Hub{
 		// Make it unbuffered with no readers - so emit operation fails immediately.
-		join: make(chan *sessionJoin),
+		join: make(chan *ClientComMessage),
 	}
 	globals.hub = hub
 
@@ -355,7 +355,7 @@ func TestDispatchLeave(t *testing.T) {
 
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
-	leave := make(chan *sessionLeave, 1)
+	leave := make(chan *ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		done: leave,
@@ -381,7 +381,7 @@ func TestDispatchLeave(t *testing.T) {
 		if req.sess != s {
 			t.Error("Leave request: sess field expected to be the session under test.")
 		}
-		if req.pkt != msg {
+		if req != msg {
 			t.Error("Leave request: leave message expected to be the original leave message.")
 		}
 	} else {
@@ -508,7 +508,7 @@ func TestDispatchPublish(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	brdcst := make(chan *ServerComMessage, 1)
+	brdcst := make(chan *ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		broadcast: brdcst,
@@ -536,14 +536,11 @@ func TestDispatchPublish(t *testing.T) {
 		if req.sess != s {
 			t.Error("Pub request: sess field expected to be the session under test.")
 		}
-		if req.Data.Content != testMessage {
-			t.Errorf("Pub request content: expected '%s' vs '%s'.", testMessage, req.Data.Content)
+		if req.Pub.Content != testMessage {
+			t.Errorf("Pub request content: expected '%s' vs '%s'.", testMessage, req.Pub.Content)
 		}
-		if req.Data.Topic != destUid.UserId() {
-			t.Errorf("Pub request topic: expected '%s' vs '%s'.", destUid.UserId(), req.Data.Topic)
-		}
-		if req.Data.From != uid.UserId() {
-			t.Errorf("Pub request from: expected '%s' vs '%s'.", uid.UserId(), req.Data.From)
+		if req.Pub.Topic != destUid.UserId() {
+			t.Errorf("Pub request topic: expected '%s' vs '%s'.", destUid.UserId(), req.Pub.Topic)
 		}
 	} else {
 		t.Errorf("Pub messages: expected 1, received %d.", len(brdcst))
@@ -569,7 +566,7 @@ func TestDispatchPublishBroadcastChannelFull(t *testing.T) {
 
 	// Make broadcast channel unbuffered with no reader -
 	// emit op will fail.
-	brdcst := make(chan *ServerComMessage)
+	brdcst := make(chan *ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		broadcast: brdcst,
@@ -643,7 +640,7 @@ func TestDispatchGet(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	meta := make(chan *metaReq, 1)
+	meta := make(chan *ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
@@ -671,9 +668,6 @@ func TestDispatchGet(t *testing.T) {
 		req := <-meta
 		if req.sess != s {
 			t.Error("Get request: sess field expected to be the session under test.")
-		}
-		if req.pkt != msg {
-			t.Error("Get request pkt: expected original client request.")
 		}
 	} else {
 		t.Errorf("Get messages: expected 1, received %d.", len(meta))
@@ -731,7 +725,7 @@ func TestDispatchGetMetaChannelFull(t *testing.T) {
 	topicName := uid.P2PName(destUid)
 
 	// Unbuffered chan with no readers - emit will fail.
-	meta := make(chan *metaReq)
+	meta := make(chan *ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
@@ -771,7 +765,7 @@ func TestDispatchSet(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	meta := make(chan *metaReq, 1)
+	meta := make(chan *ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
@@ -803,12 +797,9 @@ func TestDispatchSet(t *testing.T) {
 		if req.sess != s {
 			t.Error("Set request: sess field expected to be the session under test.")
 		}
-		if req.pkt != msg {
-			t.Error("Set request pkt: expected original client request.")
-		}
 		expectedWhat := constMsgMetaDesc | constMsgMetaSub | constMsgMetaTags | constMsgMetaCred
-		if req.pkt.MetaWhat != expectedWhat {
-			t.Errorf("Set request what: expected %d vs %d", expectedWhat, req.pkt.MetaWhat)
+		if msg.MetaWhat != expectedWhat {
+			t.Errorf("Set request what: expected %d vs %d", expectedWhat, msg.MetaWhat)
 		}
 	} else {
 		t.Errorf("Set messages: expected 1, received %d.", len(meta))
@@ -865,7 +856,7 @@ func TestDispatchSetMetaChannelFull(t *testing.T) {
 	topicName := uid.P2PName(destUid)
 
 	// Unbuffered meta channel w/ no readers - emit will fail.
-	meta := make(chan *metaReq)
+	meta := make(chan *ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
@@ -909,7 +900,7 @@ func TestDispatchDelMsg(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	meta := make(chan *metaReq, 1)
+	meta := make(chan *ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
@@ -937,9 +928,6 @@ func TestDispatchDelMsg(t *testing.T) {
 		req := <-meta
 		if req.sess != s {
 			t.Error("Del request: sess field expected to be the session under test.")
-		}
-		if req.pkt != msg {
-			t.Error("Del request pkt: expected original client request.")
 		}
 	} else {
 		t.Errorf("Del messages: expected 1, received %d.", len(meta))
@@ -995,7 +983,7 @@ func TestDispatchDelMetaChanFull(t *testing.T) {
 	topicName := uid.P2PName(destUid)
 
 	// Unbuffered chan - to simulate a full buffered chan.
-	meta := make(chan *metaReq)
+	meta := make(chan *ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		meta: meta,
@@ -1069,7 +1057,7 @@ func TestDispatchNote(t *testing.T) {
 	destUid := types.Uid(2)
 	topicName := uid.P2PName(destUid)
 
-	brdcst := make(chan *ServerComMessage, 1)
+	brdcst := make(chan *ClientComMessage, 1)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		broadcast: brdcst,
@@ -1096,20 +1084,14 @@ func TestDispatchNote(t *testing.T) {
 		if req.sess != s {
 			t.Error("Pub request: sess field expected to be the session under test.")
 		}
-		if req.Info.What != msg.Note.What {
-			t.Errorf("Note request what: expected '%s' vs '%s'.", msg.Note.What, req.Info.What)
+		if req.Note.What != msg.Note.What {
+			t.Errorf("Note request what: expected '%s' vs '%s'.", msg.Note.What, req.Note.What)
 		}
-		if req.Info.SeqId != msg.Note.SeqId {
-			t.Errorf("Note request seqId: expected %d vs %d.", msg.Note.SeqId, req.Info.SeqId)
+		if req.Note.SeqId != msg.Note.SeqId {
+			t.Errorf("Note request seqId: expected %d vs %d.", msg.Note.SeqId, req.Note.SeqId)
 		}
-		if req.Info.Topic != destUid.UserId() {
-			t.Errorf("Note request topic: expected '%s' vs '%s'.", destUid.UserId(), req.Info.Topic)
-		}
-		if req.Info.From != uid.UserId() {
-			t.Errorf("Note request from: expected '%s' vs '%s'.", uid.UserId(), req.Info.From)
-		}
-		if req.SkipSid != s.sid {
-			t.Errorf("Note request skipSid: expected '%s' vs '%s'.", s.sid, req.SkipSid)
+		if req.Note.Topic != destUid.UserId() {
+			t.Errorf("Note request topic: expected '%s' vs '%s'.", destUid.UserId(), req.Note.Topic)
 		}
 	} else {
 		t.Errorf("Note messages: expected 1, received %d.", len(brdcst))
@@ -1134,7 +1116,7 @@ func TestDispatchNoteBroadcastChanFull(t *testing.T) {
 	topicName := uid.P2PName(destUid)
 
 	// Unbuffered chan - to simulate a full buffered chan.
-	brdcst := make(chan *ServerComMessage)
+	brdcst := make(chan *ClientComMessage)
 	s.subs = make(map[string]*Subscription)
 	s.subs[topicName] = &Subscription{
 		broadcast: brdcst,
@@ -1189,8 +1171,8 @@ func TestDispatchNoteOnNonSubscribedTopic(t *testing.T) {
 
 func TestDispatchAccNew(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	ss := mock_store.NewMockStoreInterface(ctrl)
-	uu := mock_store.NewMockUsersObjMapperInterface(ctrl)
+	ss := mock_store.NewMockPersistentStorageInterface(ctrl)
+	uu := mock_store.NewMockUsersPersistenceInterface(ctrl)
 	aa := mock_auth.NewMockAuthHandler(ctrl)
 
 	uid := types.Uid(1)
