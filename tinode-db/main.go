@@ -12,10 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinode/chat/server/auth"
+
 	_ "github.com/tinode/chat/server/db/mongodb"
 	_ "github.com/tinode/chat/server/db/mysql"
 	_ "github.com/tinode/chat/server/db/rethinkdb"
 	"github.com/tinode/chat/server/store"
+	"github.com/tinode/chat/server/store/types"
 	jcr "github.com/tinode/jsonco"
 )
 
@@ -23,7 +26,7 @@ type configType struct {
 	StoreConfig json.RawMessage `json:"store_config"`
 }
 
-type vCardy struct {
+type theCard struct {
 	Fn    string `json:"fn"`
 	Photo string `json:"photo"`
 	Type  string `json:"type"`
@@ -31,6 +34,15 @@ type vCardy struct {
 
 type tPrivate struct {
 	Comment string `json:"comment"`
+}
+
+type tTrusted struct {
+	Verified bool `json:"verified,omitempty"`
+	Staff    bool `json:"staff,omitempty"`
+}
+
+func (t tTrusted) IsZero() bool {
+	return !t.Verified && !t.Staff
 }
 
 // DefAccess is default access mode.
@@ -68,7 +80,8 @@ type User struct {
 	Username    string      `json:"username"`
 	Password    string      `json:"passhash"`
 	Private     tPrivate    `json:"private"`
-	Public      vCardy      `json:"public"`
+	Public      theCard     `json:"public"`
+	Trusted     tTrusted    `json:"trusted"`
 	State       string      `json:"state"`
 	Status      interface{} `json:"status"`
 	AddressBook []string    `json:"addressBook"`
@@ -89,7 +102,8 @@ type GroupTopic struct {
 	Name         string    `json:"name"`
 	Owner        string    `json:"owner"`
 	Channel      bool      `json:"channel"`
-	Public       vCardy    `json:"public"`
+	Public       theCard   `json:"public"`
+	Trusted      tTrusted  `json:"trusted"`
 	Access       DefAccess `json:"access"`
 	Tags         []string  `json:"tags"`
 	OwnerPrivate tPrivate  `json:"ownerPrivate"`
@@ -172,6 +186,9 @@ func main() {
 	reset := flag.Bool("reset", false, "force database reset")
 	upgrade := flag.Bool("upgrade", false, "perform database version upgrade")
 	noInit := flag.Bool("no_init", false, "check that database exists but don't create if missing")
+	uid := flag.String("uid", "", "ID of the user to update")
+	scheme := flag.String("scheme", "basic", "User's authentication scheme to update")
+	authLevel := flag.String("auth", "", "change user's authentication level (one of ROOT, AUTH, ANON)")
 	datafile := flag.String("data", "", "name of file with sample data to load")
 	conffile := flag.String("config", "./tinode.conf", "config of the database connection")
 
@@ -216,7 +233,7 @@ func main() {
 	err := store.Store.Open(1, config.StoreConfig)
 	defer store.Store.Close()
 
-	log.Println("Database adapter:", store.Store.GetAdapterName(), ", version:", store.Store.GetAdapterVersion())
+	log.Printf("Database adapter: '%s'; version: %d", store.Store.GetAdapterName(), store.Store.GetAdapterVersion())
 
 	if err != nil {
 		if strings.Contains(err.Error(), "Database not initialized") {
@@ -239,6 +256,24 @@ func main() {
 		}
 	} else if *reset {
 		log.Println("Database reset requested")
+	} else if *authLevel != "" {
+		level := auth.ParseAuthLevel(*authLevel)
+		if level == auth.LevelNone {
+			log.Fatalf("Invalid authentication level: '%s'", *authLevel)
+		}
+		userId := types.ParseUserId(*uid)
+		if userId.IsZero() {
+			log.Fatalf("Must specify a valid user ID to update level: '%s'", *uid)
+		}
+		if *scheme == "" {
+			log.Fatalln("Must specify user's authentication scheme to update level")
+		}
+		adapter := store.Store.GetAdapter()
+		if err := adapter.AuthUpdRecord(userId, *scheme, "", level, nil, time.Time{}); err != nil {
+			log.Fatalln("Failed to update user's auth level:", err)
+		}
+		log.Printf("User's %s level set to %s for scheme %s.", *uid, level.String(), *scheme)
+		os.Exit(0)
 	} else {
 		log.Println("Database exists, DB version is correct. All done.")
 		os.Exit(0)

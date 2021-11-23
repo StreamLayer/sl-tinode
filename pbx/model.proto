@@ -92,6 +92,7 @@ message SetDesc {
 	DefaultAcsMode default_acs = 1;
 	bytes public = 2;
 	bytes private = 3;
+	bytes trusted = 4;
 }
 
 message GetOpts {
@@ -269,6 +270,13 @@ message ClientNote {
 	bytes content = 4;
 }
 
+message ClientExtra {
+	repeated string attachments = 1;
+	// Root user may send messages on behalf of other users.
+	string on_behalf_of = 2;
+	AuthLevel auth_level = 3;
+}
+
 message ClientMsg {
 	oneof Message {
 		ClientHi hi = 1;
@@ -282,9 +290,8 @@ message ClientMsg {
 		ClientDel del = 9;
 		ClientNote note = 10;
 	}
-	// Root user may send messages on behalf of other users.
-	string on_behalf_of = 11;
-	AuthLevel auth_level = 12;
+	// Additional message parameters.
+	ClientExtra extra = 13;
 }
 
 // ************************
@@ -315,6 +322,8 @@ message TopicDesc {
 	bytes private = 11;
 	string state = 12;
 	int64 state_at = 13;
+	bytes trusted = 14;
+	bool is_chan = 17; // 17!
 
 	// P2P only: other user's last online timestamp & user agent
 	int64 last_seen_time = 15;
@@ -333,6 +342,7 @@ message TopicSub {
 	int32 read_id = 5;
 	int32 recv_id = 6;
 	bytes public  = 7;
+	bytes trusted = 16; // 16!
 	bytes private = 8;
 
 	// Response to non-'me' topic
@@ -361,7 +371,6 @@ message DelValues {
 	int32 del_id = 1;
 	repeated SeqRange del_seq = 2;
 }
-
 
 // {ctrl} message
 message ServerCtrl {

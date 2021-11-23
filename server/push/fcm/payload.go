@@ -153,7 +153,7 @@ func payloadToData(pl *push.Payload) (map[string]string, error) {
 		data["mime"] = pl.ContentType
 
 		// Convert Drafty content to plain text (clients 0.16 and below).
-		data["content"], err = drafty.ToPlainText(pl.Content)
+		data["content"], err = drafty.PlainText(pl.Content)
 		if err != nil {
 			return nil, err
 		}
@@ -286,10 +286,18 @@ func PrepareNotifications(rcpt *push.Receipt, config *AndroidConfig) []MessageDa
 	var messages []MessageData
 	for uid, devList := range devices {
 		userData := data
-		if rcpt.To[uid].Delivered > 0 {
-			// Silence the push for user who have received the data interactively.
+		tcat := t.GetTopicCat(data["topic"])
+		if rcpt.To[uid].Delivered > 0 || tcat == t.TopicCatP2P {
 			userData = clonePayload(data)
-			userData["silent"] = "true"
+			// Fix topic name for P2P pushes.
+			if tcat == t.TopicCatP2P {
+				topic, _ := t.P2PNameForUser(uid, data["topic"])
+				userData["topic"] = topic
+			}
+			// Silence the push for user who have received the data interactively.
+			if rcpt.To[uid].Delivered > 0 {
+				userData["silent"] = "true"
+			}
 		}
 		for i := range devList {
 			d := &devList[i]

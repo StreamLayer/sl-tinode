@@ -13,6 +13,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"math/rand"
 	"net/http"
 	"os"
 	"runtime"
@@ -60,7 +61,7 @@ import (
 
 const (
 	// currentVersion is the current API/protocol version
-	currentVersion = "0.17"
+	currentVersion = "0.18"
 	// minSupportedVersion is the minimum supported API version
 	minSupportedVersion = "0.16"
 
@@ -168,6 +169,8 @@ var globals struct {
 
 	// Maximum allowed upload size.
 	maxFileUploadSize int64
+	// Periodicity of a garbage collector for abandoned media uploads.
+	mediaGcPeriod time.Duration
 
 	// Prioritize X-Forwarded-For header as the source of IP address of the client.
 	useXForwardedFor bool
@@ -329,6 +332,9 @@ func main() {
 		decVersion = base10Version(parseVersion(currentVersion))
 	}
 	statsSet("Version", decVersion)
+
+	// Initialize random state
+	rand.Seed(time.Now().UnixNano())
 
 	// Initialize serving debug profiles (optional).
 	servePprof(mux, *pprofUrl)
@@ -517,8 +523,8 @@ func main() {
 				}
 			}
 			if config.Media.GcPeriod > 0 && config.Media.GcBlockSize > 0 {
-				stopFilesGc := largeFileRunGarbageCollection(time.Second*time.Duration(config.Media.GcPeriod),
-					config.Media.GcBlockSize)
+				globals.mediaGcPeriod = time.Second * time.Duration(config.Media.GcPeriod)
+				stopFilesGc := largeFileRunGarbageCollection(globals.mediaGcPeriod, config.Media.GcBlockSize)
 				defer func() {
 					stopFilesGc <- true
 					logs.Info.Println("Stopped files garbage collector")
@@ -566,7 +572,7 @@ func main() {
 	}
 
 	// Serve static content from the directory in -static_data flag if that's
-	// available, otherwise assume '<path-to-executable>/static'. The content is served at
+	// available, otherwise assume '<current-dir>/static'. The content is served at
 	// the path pointed by 'static_mount' in the config. If that is missing then it's
 	// served at root '/'.
 	var staticMountPoint string
