@@ -978,8 +978,6 @@ func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
 		msg.sess.queueOut(reply)
 	}
 
-	var pushRcpt *push.Receipt
-	pushRcpt = t.pushForData(asUid, msg.Pub, msg.sess.OrganizationId)
 	data := &ServerComMessage{
 		Data: &MsgServerData{
 			Topic:     msg.Original,
@@ -1011,7 +1009,7 @@ func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
 	t.broadcastToSessions(data)
 
 	// usersPush will update unread message count and send push notification.
-	pushRcpt := t.pushForData(asUid, data.Data)
+	pushRcpt := t.pushForData(asUid, data.Data, msg.sess.OrganizationId)
 	usersPush(pushRcpt)
 }
 
