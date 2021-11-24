@@ -223,6 +223,7 @@ func initTopicFnd(t *Topic, sreg *ClientComMessage) error {
 // There is a reace condition when two users try to create a p2p topic at the same time.
 func initTopicP2P(t *Topic, sreg *ClientComMessage) error {
 	pktsub := sreg.Sub
+	now := types.TimeNow()
 
 	// Handle the following cases:
 	// 1. Neither topic nor subscriptions exist: create a new p2p topic & subscriptions.

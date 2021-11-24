@@ -979,24 +979,22 @@ func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
 	}
 
 	var pushRcpt *push.Receipt
-	if !t.isProxy {
-		pushRcpt = t.pushForData(asUser, msg.Data, msg.sess.OrganizationId)
-		data := &ServerComMessage{
-			Data: &MsgServerData{
-				Topic:     msg.Original,
-				From:      msg.AsUser,
-				Timestamp: msg.Timestamp,
-				SeqId:     t.lastID,
-				Head:      msg.Pub.Head,
-				Content:   msg.Pub.Content,
-			},
-			// Internal-only values.
-			Id:        msg.Id,
-			RcptTo:    msg.RcptTo,
-			AsUser:    msg.AsUser,
+	pushRcpt = t.pushForData(asUid, msg.Pub, msg.sess.OrganizationId)
+	data := &ServerComMessage{
+		Data: &MsgServerData{
+			Topic:     msg.Original,
+			From:      msg.AsUser,
 			Timestamp: msg.Timestamp,
-			sess:      msg.sess,
-		}
+			SeqId:     t.lastID,
+			Head:      msg.Pub.Head,
+			Content:   msg.Pub.Content,
+		},
+		// Internal-only values.
+		Id:        msg.Id,
+		RcptTo:    msg.RcptTo,
+		AsUser:    msg.AsUser,
+		Timestamp: msg.Timestamp,
+		sess:      msg.sess,
 	}
 
 	if msg.Pub.NoEcho {
