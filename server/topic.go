@@ -978,7 +978,7 @@ func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
 		msg.sess.queueOut(reply)
 	}
 
-	data := &ClientComMessage{
+	data := &ServerComMessage{
 		Data: &MsgServerData{
 			Topic:     msg.Original,
 			From:      msg.AsUser,
