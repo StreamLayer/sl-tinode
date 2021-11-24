@@ -336,6 +336,8 @@ type ClientComMessage struct {
 	Set   *MsgClientSet   `json:"set"`
 	Del   *MsgClientDel   `json:"del"`
 	Note  *MsgClientNote  `json:"note"`
+	Info  *MsgServerInfo  `json:"info,omitempty"`
+
 	// Optional data.
 	Extra *MsgClientExtra `json:"extra"`
 

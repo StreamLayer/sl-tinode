@@ -1236,21 +1236,6 @@ func (s *Session) note(msg *ClientComMessage) {
 		return
 	}
 
-	response := &ServerComMessage{
-		Info: &MsgServerInfo{
-			Topic:   msg.Original,
-			From:    msg.AsUser,
-			What:    msg.Note.What,
-			SeqId:   msg.Note.SeqId,
-			Content: msg.Note.Content,
-		},
-		RcptTo:    msg.RcptTo,
-		AsUser:    msg.AsUser,
-		Timestamp: msg.Timestamp,
-		SkipSid:   s.sid,
-		sess:      s,
-	}
-
 	if sub := s.getSub(msg.RcptTo); sub != nil {
 		// Pings can be sent to subscribed topics only
 		select {
@@ -1270,6 +1255,31 @@ func (s *Session) note(msg *ClientComMessage) {
 			// Reply with a 500 to the user.
 			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
 			logs.Err.Println("s.note: hub.route channel full", s.sid)
+		}
+	} else if msg.Note.What == "bypass" {
+		// Client received a pres notification about a new message, initiated a fetch
+		// from the server (and detached from the topic) and acknowledges receipt.
+		// Hub will forward to topic, if appropriate.
+		data := &ClientComMessage{
+			Info: &MsgServerInfo{
+				Topic:   msg.Original,
+				From:    msg.AsUser,
+				What:    msg.Note.What,
+				SeqId:   msg.Note.SeqId,
+				Content: msg.Note.Content,
+			},
+			RcptTo:    msg.RcptTo,
+			AsUser:    msg.AsUser,
+			Timestamp: msg.Timestamp,
+			sess:      s,
+		}
+
+		select {
+		case sub.broadcast <- data:
+		default:
+			// Reply with a 500 to the user.
+			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
+			logs.Err.Println("s.note: sub.broacast channel full, topic ", msg.RcptTo, s.sid)
 		}
 	} else {
 		s.queueOut(ErrAttachFirst(msg, msg.Timestamp))
