@@ -63,7 +63,7 @@ By https://github.com/StreamLayer/sl-infrastructure/blob/staging/manifests/apps/
         "cluster_config": {
           // Name of this node. Can be assigned from the command line.
           // Empty string disables clustering.
-          "self": "",
+          "self": process.env.HOSTNAME,
           // naive way to set cluster nodes
           {{ if gt (int .Values.replicaCount) 1 }}
           {{ $node_name := include "microfleet.fullname" $ }}
