@@ -272,7 +272,8 @@ func main() {
 	tlsEnabled := flag.Bool("tls_enabled", false, "Override config value for enabling TLS.")
 	clusterSelf := flag.String("cluster_self", "", "Override the name of the current cluster node.")
 	expvarPath := flag.String("expvar", "", "Override the URL path where runtime stats are exposed. Use '-' to disable.")
-	serverStatusPath := flag.String("server_status", "", "Override the URL path where the server's internal status is displayed. Use '-' to disable.")
+	serverStatusPath := flag.String("server_status", "",
+		"Override the URL path where the server's internal status is displayed. Use '-' to disable.")
 	pprofFile := flag.String("pprof", "", "File name to save profiling info to. Disabled if not set.")
 	pprofUrl := flag.String("pprof_url", "", "Debugging only! URL path for exposing profiling info. Disabled if not set.")
 	flag.Parse()
@@ -393,7 +394,7 @@ func main() {
 	for _, name := range authNames {
 		if authhdl := store.Store.GetLogicalAuthHandler(name); authhdl == nil {
 			logs.Err.Fatalln("Unknown authenticator", name)
-		} else if jsconf := config.Auth[name]; jsconf != nil {
+		} else if jsconf := config.Auth[authhdl.GetRealName()]; jsconf != nil {
 			if err := authhdl.Init(jsconf, name); err != nil {
 				logs.Err.Fatalln("Failed to init auth scheme", name+":", err)
 			}

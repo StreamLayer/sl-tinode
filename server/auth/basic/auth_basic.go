@@ -320,6 +320,13 @@ func (a *authenticator) GetResetParams(uid types.Uid) (map[string]interface{}, e
 	return params, nil
 }
 
+const realName = "basic"
+
+// GetRealName returns the hardcoded name of the authenticator.
+func (authenticator) GetRealName() string {
+	return realName
+}
+
 func init() {
-	store.RegisterAuthScheme("basic", &authenticator{})
+	store.RegisterAuthScheme(realName, &authenticator{})
 }
