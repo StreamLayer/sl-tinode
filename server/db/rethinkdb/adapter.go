@@ -1178,13 +1178,6 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 		} else {
 			ims = *opts.IfModifiedSince
 		}
-	} else {
-		q = q.GetAllByIndex("User", userId)
-	}
-
-	if !keepDeleted {
-		// Filter out rows with defined DeletedAt
-		q = q.Filter(rdb.Row.HasFields("DeletedAt").Not())
 	}
 
 	q = q.Limit(limit)
