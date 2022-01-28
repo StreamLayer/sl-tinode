@@ -1,4 +1,3 @@
-//go:build rethinkdb
 // +build rethinkdb
 
 // Package rethinkdb s a database adapter for RethinkDB.
@@ -729,7 +728,7 @@ func (a *adapter) AuthGetUniqueRecord(unique string) (t.Uid, auth.Level, []byte,
 
 // UserGet fetches a single user by user id. If user is not found it returns (nil, nil)
 func (a *adapter) UserGet(uid t.Uid) (*t.User, error) {
-	cursor, err := rdb.DB(a.dbName).Table("users").GetAll(uid.String()).
+	cursor, err := rdb.DB(a.dbName).Table("users").Get(uid.String()).
 		Filter(rdb.Row.Field("State").Eq(t.StateDeleted).Not()).Run(a.conn)
 	if err != nil {
 		return nil, err
@@ -1138,14 +1137,9 @@ func (a *adapter) TopicGet(topic string) (*t.Topic, error) {
 func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) ([]t.Subscription, error) {
 	// Fetch ALL user's subscriptions, even those which has not been modified recently.
 	// We are going to use these subscriptions to fetch topics and users which may have been modified recently.
-	q := rdb.DB(a.dbName).Table("subscriptions").GetAllByIndex("User", uid.String())
+	q := rdb.DB(a.dbName).Table("subscriptions")
 	limit := a.maxResults
 	userId := uid.String()
-
-	if !keepDeleted {
-		// Filter out rows with defined DeletedAt
-		q = q.Filter(rdb.Row.HasFields("DeletedAt").Not())
-	}
 
 	ims := time.Time{}
 
@@ -1178,6 +1172,13 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 		} else {
 			ims = *opts.IfModifiedSince
 		}
+	} else {
+		q = q.GetAllByIndex("User", userId)
+	}
+
+	if !keepDeleted {
+		// Filter out rows with defined DeletedAt
+		q = q.Filter(rdb.Row.HasFields("DeletedAt").Not())
 	}
 
 	q = q.Limit(limit)
