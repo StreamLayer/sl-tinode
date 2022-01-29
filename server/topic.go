@@ -922,6 +922,8 @@ func (t *Topic) sendSubNotifications(asUid types.Uid, sid, userAgent string) {
 // handlePubBroadcast fans out {pub} -> {data} messages to recipients in a master topic.
 // This is a NON-proxy broadcast.
 func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
+	logs.Printf("handlePubBroadcast[%s]: received message: %v", t.name, msg)
+
 	asUid := types.ParseUserId(msg.AsUser)
 	if t.isInactive() {
 		// Ignore broadcast - topic is paused or being deleted.
@@ -1007,6 +1009,8 @@ func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
 	pluginMessage(data.Data, plgActCreate)
 
 	t.broadcastToSessions(data)
+
+	logs.Printf("prep to pushForData[%s]: message: %v", asUid, msg.sess)
 
 	// usersPush will update unread message count and send push notification.
 	pushRcpt := t.pushForData(asUid, data.Data, msg.sess.OrganizationId)
