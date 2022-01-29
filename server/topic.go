@@ -10,6 +10,7 @@ package main
 
 import (
 	"errors"
+	"log"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -922,7 +923,7 @@ func (t *Topic) sendSubNotifications(asUid types.Uid, sid, userAgent string) {
 // handlePubBroadcast fans out {pub} -> {data} messages to recipients in a master topic.
 // This is a NON-proxy broadcast.
 func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
-	logs.Printf("handlePubBroadcast[%s]: received message: %v", t.name, msg)
+	log.Printf("handlePubBroadcast[%s]: received message: %v", t.name, msg)
 
 	asUid := types.ParseUserId(msg.AsUser)
 	if t.isInactive() {
