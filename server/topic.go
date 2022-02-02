@@ -1013,7 +1013,7 @@ func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
 	logs.Warn.Printf("prep to pushForData[%s]: message: %v", asUid, msg.sess)
 
 	// usersPush will update unread message count and send push notification.
-	pushRcpt := t.pushForData(asUid, data.Data, msg.OrganizationId)
+	pushRcpt := t.pushForData(asUid, data.Data, msg.sess.OrganizationId)
 	usersPush(pushRcpt)
 }
 
