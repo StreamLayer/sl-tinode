@@ -3306,6 +3306,8 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData, organization
 		},
 	}
 
+	logs.Warn.Printf("receipt[%s] %v", organizationId, receipt)
+
 	if t.isChan {
 		// Channel readers should get a push on a channel name (as an FCM topic push).
 		receipt.Channel = types.GrpToChn(t.name)
