@@ -1497,6 +1497,7 @@ func (a *adapter) TopicShare(shares []*t.Subscription) error {
 				"CreatedAt": newsub.Field("CreatedAt"),
 				"UpdatedAt": newsub.Field("UpdatedAt"),
 				"ModeGiven": newsub.Field("ModeGiven"),
+				"ModeWant":  newsub.Field("ModeWant"),
 				"DelId":     0,
 				"ReadSeqId": 0,
 				"RecvSeqId": 0})
@@ -1566,7 +1567,7 @@ func (a *adapter) TopicOwnerChange(topic string, newOwner t.Uid) error {
 }
 
 // SubscriptionGet returns a subscription of a user to a topic
-func (a *adapter) SubscriptionGet(topic string, user t.Uid) (*t.Subscription, error) {
+func (a *adapter) SubscriptionGet(topic string, user t.Uid, keepDeleted bool) (*t.Subscription, error) {
 
 	cursor, err := rdb.DB(a.dbName).Table("subscriptions").Get(topic + ":" + user.String()).Run(a.conn)
 	if err != nil {
@@ -1583,7 +1584,7 @@ func (a *adapter) SubscriptionGet(topic string, user t.Uid) (*t.Subscription, er
 		return nil, err
 	}
 
-	if sub.DeletedAt != nil {
+	if !keepDeleted && sub.DeletedAt != nil {
 		return nil, nil
 	}
 
