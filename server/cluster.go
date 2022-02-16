@@ -641,8 +641,9 @@ func (c *Cluster) routeUserReq(req *UserCacheReq) error {
 			if r == nil {
 				r = &UserCacheReq{
 					PushRcpt: &push.Receipt{
-						Payload: req.PushRcpt.Payload,
-						To:      make(map[types.Uid]push.Recipient),
+						Payload:        req.PushRcpt.Payload,
+						OrganizationId: req.PushRcpt.OrganizationId,
+						To:             make(map[types.Uid]push.Recipient),
 					},
 					Node: c.thisNodeName,
 				}
