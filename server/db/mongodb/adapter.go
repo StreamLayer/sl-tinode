@@ -17,6 +17,7 @@ import (
 	"github.com/tinode/chat/server/db/common"
 	"github.com/tinode/chat/server/store"
 	t "github.com/tinode/chat/server/store/types"
+	"go.mongodb.org/mongo-driver/bson"
 	b "go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	mdb "go.mongodb.org/mongo-driver/mongo"
@@ -1318,6 +1319,20 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 	limit := 0
 	ims := time.Time{}
 	if opts != nil {
+		// CUSTOM PAGINATION
+		// from last topic time to end or to start of daterange
+		if opts.LastCreatedAt != nil {
+			if opts.Order == "desc" {
+				filter["createdAt"] = bson.M{
+					"$lte": opts.LastCreatedAt,
+				}
+			} else {
+				filter["createdAt"] = bson.M{
+					"$gte": opts.LastCreatedAt,
+				}
+			}
+		}
+
 		if opts.Topic != "" {
 			filter["topic"] = opts.Topic
 		}
@@ -1340,6 +1355,11 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 	var findOpts *mdbopts.FindOptions
 	if limit > 0 {
 		findOpts = mdbopts.Find().SetLimit(int64(limit))
+	}
+	if opts.Order == "desc" {
+		findOpts.SetSort(b.D{{"createdAt", -1}})
+	} else {
+		findOpts.SetSort(b.D{{"createdAt", 1}})
 	}
 
 	cur, err := a.db.Collection("subscriptions").Find(a.ctx, filter, findOpts)
