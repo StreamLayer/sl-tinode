@@ -1356,7 +1356,7 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 	if limit > 0 {
 		findOpts = mdbopts.Find().SetLimit(int64(limit))
 	}
-	if opts.Order == "desc" {
+	if opts != nil && opts.Order == "desc" {
 		findOpts.SetSort(b.D{{"createdAt", -1}})
 	} else {
 		findOpts.SetSort(b.D{{"createdAt", 1}})
