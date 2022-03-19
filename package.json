@@ -1,6 +1,6 @@
 {
     "name": "@streamlayer/tinode",
-    "version": "0.22.0-rc.34",
+    "version": "0.22.0-rc.35",
     "dependencies": {
         "@commitlint/cli": "^9.1.1",
         "@semantic-release/changelog": "^5.0.1",
