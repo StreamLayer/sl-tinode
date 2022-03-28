@@ -1012,8 +1012,9 @@ func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
 	logs.Warn.Printf("prep to pushForData[%s]: message: %v", asUid, msg.sess)
 
 	// usersPush will update unread message count and send push notification.
-	pushRcpt := t.pushForData(asUid, data.Data, msg.OrganizationId)
-	usersPush(pushRcpt)
+	if pushRcpt := t.pushForData(asUid, data.Data, msg.OrganizationId); pushRcpt != nil {
+		usersPush(pushRcpt)
+	}
 }
 
 // handleNoteBroadcast fans out {note} -> {info} messages to recipients in a master topic.
@@ -1964,7 +1965,7 @@ func (t *Topic) replyGetDesc(sess *Session, asUid types.Uid, asChan bool, opts *
 	// Give subscriber a fuller description than to a stranger/channel reader.
 	if full {
 		if t.cat == types.TopicCatP2P {
-			// For p2p topics default access mode makes no sense.
+			// For p2p topics default access mode makes no sense: only participants have access to topic.
 			// Don't report it.
 		} else if t.cat == types.TopicCatMe || (pud.modeGiven & pud.modeWant).IsSharer() {
 			desc.DefaultAcs = &MsgDefaultAcsMode{
