@@ -258,6 +258,7 @@ enum InfoNote {
 	RECV = 1;
 	KP = 2;
 	BYPASS = 3;
+	REACTION = 4;
 }
 
 // ClientNote is a client-generated notification for topic subscribers

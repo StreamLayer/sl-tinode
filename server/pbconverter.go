@@ -464,6 +464,9 @@ func pbCliDeserialize(pkt *pbx.ClientMsg) *ClientComMessage {
 		case pbx.InfoNote_BYPASS:
 			msg.Note.What = "bypass"
 		}
+		case pbx.InfoNote_REACTION:
+			msg.Note.What = "reaction"
+		}
 	}
 
 	if extra := pkt.GetExtra(); extra != nil {
@@ -725,6 +728,8 @@ func pbInfoNoteWhatSerialize(what string) pbx.InfoNote {
 		out = pbx.InfoNote_RECV
 	case "bypass":
 		out = pbx.InfoNote_BYPASS
+	case "reaction":
+		out = pbx.InfoNote_REACTION
 	default:
 		logs.Err.Fatal("unknown info-note.what", what)
 	}
@@ -742,6 +747,8 @@ func pbInfoNoteWhatDeserialize(what pbx.InfoNote) string {
 		out = "recv"
 	case pbx.InfoNote_BYPASS:
 		out = "bypass"
+	case pbx.InfoNote_REACTION:
+		out = "reaction"
 	default:
 		logs.Err.Fatal("unknown info-note.what", what)
 	}

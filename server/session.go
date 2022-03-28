@@ -1229,7 +1229,7 @@ func (s *Session) note(msg *ClientComMessage) {
 		if msg.Note.SeqId <= 0 {
 			return
 		}
-	case "bypass":
+	case "bypass", "reaction":
 		if msg.Note.Content == nil {
 			return
 		}
@@ -1257,7 +1257,7 @@ func (s *Session) note(msg *ClientComMessage) {
 			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
 			logs.Err.Println("s.note: hub.route channel full", s.sid)
 		}
-	} else if msg.Note.What == "bypass" {
+	} else if msg.Note.What == "bypass" || msg.Note.What == "reaction" {
 		// Client received a pres notification about a new message, initiated a fetch
 		// from the server (and detached from the topic) and acknowledges receipt.
 		// Hub will forward to topic, if appropriate.
