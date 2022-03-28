@@ -463,7 +463,6 @@ func pbCliDeserialize(pkt *pbx.ClientMsg) *ClientComMessage {
 			msg.Note.What = "kp"
 		case pbx.InfoNote_BYPASS:
 			msg.Note.What = "bypass"
-		}
 		case pbx.InfoNote_REACTION:
 			msg.Note.What = "reaction"
 		}
