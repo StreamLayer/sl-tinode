@@ -15,7 +15,7 @@ class Macro:
         self.parser = argparse.ArgumentParser(prog=self.name(), description=self.description())
         self.add_parser_args()
         # Explain argument.
-        self.parser.add_argument('--explain', action='store_true', help='Only print out expanded macro') 
+        self.parser.add_argument('--explain', action='store_true', help='Only print out expanded macro')
     def name(self):
         """Macro name."""
         pass
@@ -49,7 +49,7 @@ class Macro:
 class Usermod(Macro):
     """Modifies user account. The following modes are available:
     * suspend/unsuspend account.
-    * change user's VCard (public name, avatar, private comment).
+    * change user's theCard (public name, description, avatar, private comment).
 
     This macro requires root privileges."""
 
@@ -65,7 +65,9 @@ class Usermod(Macro):
         self.parser.add_argument('-U', '--unsuspend', action='store_true', help='Unsuspend account')
         self.parser.add_argument('--name', help='Public name')
         self.parser.add_argument('--avatar', help='Avatar file name')
-        self.parser.add_argument('--comment', help='Private comment on account') 
+        self.parser.add_argument('--comment', help='Private comment on account')
+        self.parser.add_argument('--note', help='Account description')
+        self.parser.add_argument('--trusted', help='Add/remove trusted marker: verified, staff, danger')
 
     def expand(self, id, cmd, args):
         if not cmd.userid:
@@ -82,7 +84,7 @@ class Usermod(Macro):
             if cmd.unsuspend:
                 new_cmd += ' --suspend false'
             return [new_cmd]
-        # Change VCard.
+        # Change theCard.
         varname = cmd.varname if hasattr(cmd, 'varname') and cmd.varname else '$temp'
         set_cmd = '.must ' + varname + ' set me'
         if cmd.name is not None:
@@ -91,6 +93,10 @@ class Usermod(Macro):
             set_cmd += ' --photo="%s"' % cmd.avatar
         if cmd.comment is not None:
             set_cmd += ' --private="%s"' % cmd.comment
+        if cmd.note is not None:
+            set_cmd += ' --note="%s"' % cmd.note
+        if cmd.trusted is not None:
+            set_cmd += ' --trusted="%s"' % cmd.trusted
         old_user = tn_globals.DefaultUser if tn_globals.DefaultUser else ''
         return ['.use --user %s' % cmd.userid,
                 '.must sub me',
@@ -162,6 +168,8 @@ class Useradd(Macro):
         self.parser.add_argument('--cred', help='List of comma-separated credentials in format "(email|tel):value1,(email|tel):value2,..."')
         self.parser.add_argument('--name', help='Public name of the user')
         self.parser.add_argument('--comment', help='Private comment')
+        self.parser.add_argument('--note', help='Public description')
+        self.parser.add_argument('--trusted', help='Add/remove trusted marker: verified, staff, danger')
         self.parser.add_argument('--tags', help='Comma-separated list of tags')
         self.parser.add_argument('--avatar', help='Path to avatar file')
         self.parser.add_argument('--auth', help='Default auth acs')
@@ -182,6 +190,10 @@ class Useradd(Macro):
             new_cmd += ' --fn="%s"' % cmd.name
         if cmd.comment:
             new_cmd += ' --private="%s"' % cmd.comment
+        if cmd.note is not None:
+            set_cmd += ' --note="%s"' % cmd.note
+        if cmd.trusted is not None:
+            set_cmd += ' --trusted="%s"' % cmd.trusted
         if cmd.tags:
             new_cmd += ' --tags="%s"' % cmd.tags
         if cmd.avatar:
@@ -287,14 +299,14 @@ class Chcred(Macro):
                 '.use --user "%s"' % old_user]
 
 
-class VCard(Macro):
-    """Prints user's VCard."""
+class Thecard(Macro):
+    """Prints user's theCard."""
 
     def name(self):
-        return "vcard"
+        return "thecard"
 
     def description(self):
-        return "Print user's VCard for a user (requires root privileges)"
+        return "Print theCard for a user (requires root privileges)"
 
     def add_parser_args(self):
         self.parser.add_argument('userid', help='User id')
@@ -324,4 +336,4 @@ def parse_macro(parts):
     return macro.parser
 
 
-Macros = {x.name(): x for x in [Usermod(), Resolve(), Passwd(), Useradd(), Chacs(), Userdel(), Chcred(), VCard()]}
+Macros = {x.name(): x for x in [Usermod(), Resolve(), Passwd(), Useradd(), Chacs(), Userdel(), Chcred(), Thecard()]}

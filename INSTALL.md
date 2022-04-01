@@ -1,5 +1,7 @@
 # Installing Tinode
 
+The config file [`tinode.conf`](./server/tinode.conf) contains extensive instructions on configuring the server.
+
 ## Installing from Binaries
 
 1. Visit the [Releases page](https://github.com/tinode/chat/releases/), choose the latest or otherwise the most suitable release. From the list of binaries download the one for your database and platform. Once the binary is downloaded, unpack it to a directory of your choosing, `cd` to that directory.
@@ -26,17 +28,17 @@ See [instructions](./docker/README.md)
 
 ## Building from Source
 
-1. Install [Go environment](https://golang.org/doc/install). Make sure Go version is at least 1.9. Building with Go 1.8 or below **will fail**!
+1. Install [Go environment](https://golang.org/doc/install). Make sure Go version is at least 1.14. Building with Go 1.13 or below **will fail**!
 
-2. Make sure either [RethinkDB](https://www.rethinkdb.com/docs/install/) or MySQL (or MariaDB or Percona) is installed and running. MySQL 5.7 or above is required. MySQL 5.6 or below **will not work**. MongoDB (v4.2 and above) also available but it is experimental on not tested in production.
+2. OPTIONAL only if you intend to modify code: Install [protobuf](https://developers.google.com/protocol-buffers/) and [gRPC](https://grpc.io/docs/languages/go/quickstart/) including [code generator](https://developers.google.com/protocol-buffers/docs/reference/go-generated) for Go.
 
-3. Fetch, build Tinode server and tinode-db database initializer:
- - **RethinkDb**:
-	```
-	go get -tags rethinkdb github.com/tinode/chat/server && go build -tags rethinkdb -o $GOPATH/bin/tinode github.com/tinode/chat/server
-	go get -tags rethinkdb github.com/tinode/chat/tinode-db && go build -tags rethinkdb -o $GOPATH/bin/init-db github.com/tinode/chat/tinode-db
-	```
- - **MySQL**:
+3. Make sure one of the following databases is installed and running:
+ * MySQL 5.7 or above. MySQL 5.6 or below **will not work**.
+ * MongoDB 4.0 or above.
+ * RethinkDB.
+
+4. Fetch, build Tinode server and tinode-db database initializer:
+  - **MySQL**:
 	```
 	go get -tags mysql github.com/tinode/chat/server && go build -tags mysql -o $GOPATH/bin/tinode github.com/tinode/chat/server
 	go get -tags mysql github.com/tinode/chat/tinode-db && go build -tags mysql -o $GOPATH/bin/init-db github.com/tinode/chat/tinode-db
@@ -45,6 +47,11 @@ See [instructions](./docker/README.md)
 	```
 	go get -tags mongodb github.com/tinode/chat/server && go build -tags mongodb -o $GOPATH/bin/tinode github.com/tinode/chat/server
 	go get -tags mongodb github.com/tinode/chat/tinode-db && go build -tags mongodb -o $GOPATH/bin/init-db github.com/tinode/chat/tinode-db
+	```
+ - **RethinkDb**:
+	```
+	go get -tags rethinkdb github.com/tinode/chat/server && go build -tags rethinkdb -o $GOPATH/bin/tinode github.com/tinode/chat/server
+	go get -tags rethinkdb github.com/tinode/chat/tinode-db && go build -tags rethinkdb -o $GOPATH/bin/init-db github.com/tinode/chat/tinode-db
 	```
  - **All** (bundle all the above DB adapters):
 	```
@@ -61,7 +68,7 @@ See [instructions](./docker/README.md)
 	The value of `buildstamp` will be sent by the server to the clients.
 
 
-4. Open `tinode.conf`. Check that the database connection parameters are correct for your database. If you are using MySQL make sure [DSN](https://github.com/go-sql-driver/mysql#dsn-data-source-name) in `"mysql"` section is appropriate for your MySQL installation. Option `parseTime=true` is required.
+5. Open `tinode.conf`. Check that the database connection parameters are correct for your database. If you are using MySQL make sure [DSN](https://github.com/go-sql-driver/mysql#dsn-data-source-name) in `"mysql"` section is appropriate for your MySQL installation. Option `parseTime=true` is required.
 ```js
 	"mysql": {
 		"dsn": "root@tcp(localhost)/tinode?parseTime=true",
@@ -69,7 +76,7 @@ See [instructions](./docker/README.md)
 	},
 ```
 
-5. Make sure you specify the adapter name in your `tinode.conf`. E.g. you want to run Tinode with MySQL:
+6. Make sure you specify the adapter name in your `tinode.conf`. E.g. you want to run Tinode with MySQL:
 ```js
 	"store_config": {
 		...
@@ -78,26 +85,25 @@ See [instructions](./docker/README.md)
 	},
 ```
 
-6. Now that you have built the binaries, follow instructions in the _Running a Standalone Server_ section.
+7. Now that you have built the binaries, follow instructions in the _Running a Standalone Server_ section.
 
 
 ## Running a Standalone Server
 
 1. Make sure your database is running:
- - **RethinkDB**: https://www.rethinkdb.com/docs/start-a-server/
- ```
- rethinkdb --bind all --daemon
- ```
  - **MySQL**: https://dev.mysql.com/doc/mysql-startstop-excerpt/5.7/en/programs-server.html
- ```
- mysql.server start
- ```
+	```
+	mysql.server start
+	```
  - **MongoDB**: https://docs.mongodb.com/manual/administration/install-community/
-
-  MongoDB should run as single node replicaset. See https://docs.mongodb.com/manual/administration/replica-set-deployment/
-  ```
-  mongod
-  ```
+MongoDB should run as single node replicaset. See https://docs.mongodb.com/manual/administration/replica-set-deployment/
+	```
+	mongod
+	```
+ - **RethinkDB**: https://www.rethinkdb.com/docs/start-a-server/
+	```
+	rethinkdb --bind all --daemon
+	```
 
 2. Run DB initializer
 	```
@@ -171,7 +177,7 @@ A bash script [run-cluster.sh](./server/run-cluster.sh) may be found useful.
 
 ### Enabling Push Notifications
 
-Follow [instructions](./docs/faq.md#q-how-to-setup-fcm-push-notifications).
+Follow [instructions](./docs/faq.md#q-how-to-setup-push-notifications-with-google-fcm).
 
 ### Note on Running the Server in Background
 

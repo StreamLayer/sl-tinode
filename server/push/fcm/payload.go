@@ -2,13 +2,13 @@ package fcm
 
 import (
 	"errors"
-	"log"
 	"strconv"
 	"time"
 
 	fcm "firebase.google.com/go/messaging"
 
 	"github.com/tinode/chat/server/drafty"
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/push"
 	"github.com/tinode/chat/server/store"
 	t "github.com/tinode/chat/server/store/types"
@@ -151,18 +151,25 @@ func payloadToData(pl *push.Payload) (map[string]string, error) {
 	if pl.What == push.ActMsg {
 		data["seq"] = strconv.Itoa(pl.SeqId)
 		data["mime"] = pl.ContentType
-		data["content"], err = drafty.ToPlainText(pl.Content)
+
+		// Convert Drafty content to plain text (clients 0.16 and below).
+		data["content"], err = drafty.PlainText(pl.Content)
 		if err != nil {
 			return nil, err
 		}
-
-		// Trim long strings to 80 runes.
+		// Trim long strings to 128 runes.
 		// Check byte length first and don't waste time converting short strings.
-		if len(data["content"]) > maxMessageLength {
+		if len(data["content"]) > push.MaxPayloadLength {
 			runes := []rune(data["content"])
-			if len(runes) > maxMessageLength {
-				data["content"] = string(runes[:maxMessageLength]) + "…"
+			if len(runes) > push.MaxPayloadLength {
+				data["content"] = string(runes[:push.MaxPayloadLength]) + "…"
 			}
+		}
+
+		// Rich content for clients version 0.17 and above.
+		data["rc"], err = drafty.Preview(pl.Content, push.MaxPayloadLength)
+		if err != nil {
+			return nil, err
 		}
 	} else if pl.What == push.ActSub {
 		data["modeWant"] = pl.ModeWant.String()
@@ -186,7 +193,7 @@ func clonePayload(src map[string]string) map[string]string {
 func PrepareNotifications(rcpt *push.Receipt, config *AndroidConfig) []MessageData {
 	data, err := payloadToData(&rcpt.Payload)
 	if err != nil {
-		log.Println("fcm push: could not parse payload;", err)
+		logs.Warn.Println("fcm push: could not parse payload;", err)
 		return nil
 	}
 
@@ -211,7 +218,7 @@ func PrepareNotifications(rcpt *push.Receipt, config *AndroidConfig) []MessageDa
 		}
 		devices, count, err = store.Devices.GetAll(uids...)
 		if err != nil {
-			log.Println("fcm push: db error", err)
+			logs.Warn.Println("fcm push: db error", err)
 			return nil
 		}
 	}
@@ -255,6 +262,9 @@ func PrepareNotifications(rcpt *push.Receipt, config *AndroidConfig) []MessageDa
 		}
 	}
 
+	// TODO(aforge): introduce iOS push configuration (similar to Android).
+	titleIOS := "New message"
+	bodyIOS := data["content"]
 	apnsNotification := func(msg *fcm.Message) {
 		msg.APNS = &fcm.APNSConfig{
 			Payload: &fcm.APNSPayload{
@@ -265,8 +275,8 @@ func PrepareNotifications(rcpt *push.Receipt, config *AndroidConfig) []MessageDa
 					// Need to duplicate these in APNS.Payload.Aps.Alert so
 					// iOS may call NotificationServiceExtension (if present).
 					Alert: &fcm.ApsAlert{
-						Title: title,
-						Body:  body,
+						Title: titleIOS,
+						Body:  bodyIOS,
 					},
 				},
 			},
@@ -276,10 +286,18 @@ func PrepareNotifications(rcpt *push.Receipt, config *AndroidConfig) []MessageDa
 	var messages []MessageData
 	for uid, devList := range devices {
 		userData := data
-		if rcpt.To[uid].Delivered > 0 {
-			// Silence the push for user who have received the data interactively.
+		tcat := t.GetTopicCat(data["topic"])
+		if rcpt.To[uid].Delivered > 0 || tcat == t.TopicCatP2P {
 			userData = clonePayload(data)
-			userData["silent"] = "true"
+			// Fix topic name for P2P pushes.
+			if tcat == t.TopicCatP2P {
+				topic, _ := t.P2PNameForUser(uid, data["topic"])
+				userData["topic"] = topic
+			}
+			// Silence the push for user who have received the data interactively.
+			if rcpt.To[uid].Delivered > 0 {
+				userData["silent"] = "true"
+			}
 		}
 		for i := range devList {
 			d := &devList[i]
@@ -313,6 +331,8 @@ func PrepareNotifications(rcpt *push.Receipt, config *AndroidConfig) []MessageDa
 		topic := rcpt.Channel
 		userData := clonePayload(data)
 		userData["topic"] = topic
+		// Channel receiver should not know the ID of the message sender.
+		delete(userData, "xfrom")
 		msg := fcm.Message{
 			Topic: topic,
 			Data:  userData,
@@ -337,7 +357,7 @@ func PrepareNotifications(rcpt *push.Receipt, config *AndroidConfig) []MessageDa
 func DevicesForUser(uid t.Uid) []string {
 	ddef, count, err := store.Devices.GetAll(uid)
 	if err != nil {
-		log.Println("fcm devices for user: db error", err)
+		logs.Warn.Println("fcm devices for user: db error", err)
 		return nil
 	}
 
@@ -350,4 +370,14 @@ func DevicesForUser(uid t.Uid) []string {
 		devices[i] = dd.DeviceId
 	}
 	return devices
+}
+
+// ChannelsForUser loads user's channel subscriptions with P permission.
+func ChannelsForUser(uid t.Uid) []string {
+	channels, err := store.Users.GetChannels(uid)
+	if err != nil {
+		logs.Warn.Println("fcm channels for user: db error", err)
+		return nil
+	}
+	return channels
 }

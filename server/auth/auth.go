@@ -115,7 +115,7 @@ const (
 
 // MarshalText converts Feature to ASCII byte slice.
 func (f Feature) MarshalText() ([]byte, error) {
-	var res = []byte{}
+	res := []byte{}
 	for i, chr := range []byte{'V', 'L'} {
 		if (f & (1 << uint(i))) != 0 {
 			res = append(res, chr)
@@ -233,6 +233,9 @@ type AuthHandler interface {
 	// Init initializes the handler taking config string and logical name as parameters.
 	Init(jsonconf json.RawMessage, name string) error
 
+	// IsInitialized returns true if the handler is initialized.
+	IsInitialized() bool
+
 	// AddRecord adds persistent authentication record to the database.
 	// Returns: updated auth record, error
 	AddRecord(rec *Rec, secret []byte, remoteAddr string) (*Rec, error)
@@ -271,4 +274,7 @@ type AuthHandler interface {
 	// for the provided user id.
 	// Returns: map of params.
 	GetResetParams(uid types.Uid) (map[string]interface{}, error)
+
+	// GetRealName returns the hardcoded name of the authenticator.
+	GetRealName() string
 }

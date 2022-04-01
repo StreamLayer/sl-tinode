@@ -39,7 +39,7 @@ from tn_globals import stdoutln
 from tn_globals import to_json
 
 APP_NAME = "tn-cli"
-APP_VERSION = "1.5.5"
+APP_VERSION = "1.8.0"
 PROTOCOL_VERSION = "0"
 LIB_VERSION = pkg_resources.get_distribution("tinode_grpc").version
 GRPC_VERSION = pkg_resources.get_distribution("grpcio").version
@@ -78,6 +78,12 @@ RE_INDEX = re.compile(r"(\w+)\[(\w+)\]")
 # Macros module (may be None).
 macros = None
 
+# String used as a delete marker. I.e. when a value needs to be deleted, use this string
+DELETE_MARKER = 'DEL!'
+
+# Unicode DEL character used internally by Tinode when a value needs to be deleted.
+TINODE_DEL = '␡'
+
 # Python is retarded.
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -86,20 +92,25 @@ class dotdict(dict):
     __delattr__ = dict.__delitem__
 
 
-# Pack user's name and avatar into a vcard.
-def make_vcard(fn, photofile):
+# Pack name, description, and avatar into a theCard.
+def makeTheCard(fn, note, photofile):
     card = None
 
-    if (fn != None and fn.strip() != "") or photofile != None:
+    if (fn != None and fn.strip() != "") or photofile != None or note != None:
         card = {}
         if fn != None:
-            card['fn'] = fn.strip()
+            fn = fn.strip()
+            card['fn'] = TINODE_DEL if fn == DELETE_MARKER or fn == '' else fn
+
+        if note != None:
+            note = note.strip()
+            card['note'] = TINODE_DEL if note == DELETE_MARKER or note == '' else note
 
         if photofile != None:
-            if photofile == '':
+            if photofile == '' or photofile == DELETE_MARKER:
                 # Delete the avatar.
                 card['photo'] = {
-                    'data': '␡'
+                    'data': TINODE_DEL
                 }
             else:
                 try:
@@ -203,6 +214,20 @@ def parse_cred(cred):
 
     return result
 
+# Parse trusted values: [staff,rm-verified].
+def parse_trusted(trusted):
+    result = None
+    if trusted != None:
+        result = {}
+        for t in trusted.split(","):
+            t = t.strip()
+            if t.startswith("rm-"):
+                result[t[3:]] = TINODE_DEL
+            else:
+                result[t] = True
+
+    return result
+
 # Read a value in the server response using dot notation, i.e.
 # $user.params.token or $meta.sub[1].user
 def getVar(path):
@@ -295,7 +320,7 @@ def stdin(InputQueue):
     except Exception as ex:
         printerr("Exception in stdin", ex)
 
-    InputQueue.append("exit")
+    InputQueue.append('exit')
 
 # Constructing individual messages
 # {hi}
@@ -326,13 +351,14 @@ def accMsg(id, cmd, ignored):
     elif cmd.suspend == 'false':
         state = 'ok'
 
-    cmd.public = encode_to_bytes(make_vcard(cmd.fn, cmd.photo))
+    cmd.public = encode_to_bytes(makeTheCard(cmd.fn, cmd.note, cmd.photo))
     cmd.private = encode_to_bytes(cmd.private)
     return pb.ClientMsg(acc=pb.ClientAcc(id=str(id), user_id=cmd.user, state=state,
         scheme=cmd.scheme, secret=cmd.secret, login=cmd.do_login, tags=cmd.tags.split(",") if cmd.tags else None,
         desc=pb.SetDesc(default_acs=pb.DefaultAcsMode(auth=cmd.auth, anon=cmd.anon),
-            public=cmd.public, private=cmd.private),
-        cred=parse_cred(cmd.cred)), on_behalf_of=tn_globals.DefaultUser)
+            public=cmd.public, private=cmd.private, trusted=parse_trusted(cmd.trusted)),
+        cred=parse_cred(cmd.cred)),
+        extra=pb.ClientExtra(on_behalf_of=tn_globals.DefaultUser))
 
 # {login}
 def loginMsg(id, cmd, args):
@@ -366,21 +392,23 @@ def subMsg(id, cmd, ignored):
         cmd.topic = tn_globals.DefaultTopic
     if cmd.get_query:
         cmd.get_query = pb.GetQuery(what=" ".join(cmd.get_query.split(",")))
-    cmd.public = encode_to_bytes(make_vcard(cmd.fn, cmd.photo))
-    cmd.private = encode_to_bytes(cmd.private)
+    cmd.public = encode_to_bytes(makeTheCard(cmd.fn, cmd.note, cmd.photo))
+    cmd.private = TINODE_DEL if cmd.private == DELETE_MARKER else encode_to_bytes(cmd.private)
     return pb.ClientMsg(sub=pb.ClientSub(id=str(id), topic=cmd.topic,
         set_query=pb.SetQuery(
-            desc=pb.SetDesc(public=cmd.public, private=cmd.private,
+            desc=pb.SetDesc(public=cmd.public, private=cmd.private, trusted=parse_trusted(cmd.trusted),
                 default_acs=pb.DefaultAcsMode(auth=cmd.auth, anon=cmd.anon)),
             sub=pb.SetSub(mode=cmd.mode),
             tags=cmd.tags.split(",") if cmd.tags else None),
-        get_query=cmd.get_query), on_behalf_of=tn_globals.DefaultUser)
+        get_query=cmd.get_query),
+        extra=pb.ClientExtra(on_behalf_of=tn_globals.DefaultUser))
 
 # {leave}
 def leaveMsg(id, cmd, ignored):
     if not cmd.topic:
         cmd.topic = tn_globals.DefaultTopic
-    return pb.ClientMsg(leave=pb.ClientLeave(id=str(id), topic=cmd.topic, unsub=cmd.unsub), on_behalf_of=tn_globals.DefaultUser)
+    return pb.ClientMsg(leave=pb.ClientLeave(id=str(id), topic=cmd.topic, unsub=cmd.unsub),
+        extra=pb.ClientExtra(on_behalf_of=tn_globals.DefaultUser))
 
 # {pub}
 def pubMsg(id, cmd, ignored):
@@ -406,7 +434,8 @@ def pubMsg(id, cmd, ignored):
         return None
 
     return pb.ClientMsg(pub=pb.ClientPub(id=str(id), topic=cmd.topic, no_echo=True,
-        head=head, content=encode_to_bytes(content)), on_behalf_of=tn_globals.DefaultUser)
+        head=head, content=encode_to_bytes(content)),
+        extra=pb.ClientExtra(on_behalf_of=tn_globals.DefaultUser))
 
 # {get}
 def getMsg(id, cmd, ignored):
@@ -425,7 +454,8 @@ def getMsg(id, cmd, ignored):
     if cmd.cred:
         what.append("cred")
     return pb.ClientMsg(get=pb.ClientGet(id=str(id), topic=cmd.topic,
-        query=pb.GetQuery(what=" ".join(what))), on_behalf_of=tn_globals.DefaultUser)
+        query=pb.GetQuery(what=" ".join(what))),
+        extra=pb.ClientExtra(on_behalf_of=tn_globals.DefaultUser))
 
 # {set}
 def setMsg(id, cmd, ignored):
@@ -433,10 +463,10 @@ def setMsg(id, cmd, ignored):
         cmd.topic = tn_globals.DefaultTopic
 
     if cmd.public == None:
-        cmd.public = encode_to_bytes(make_vcard(cmd.fn, cmd.photo))
+        cmd.public = encode_to_bytes(makeTheCard(cmd.fn, cmd.note, cmd.photo))
     else:
-        cmd.public = encode_to_bytes(cmd.public)
-    cmd.private = encode_to_bytes(cmd.private)
+        cmd.public = TINODE_DEL if cmd.public == DELETE_MARKER else encode_to_bytes(cmd.public)
+    cmd.private = TINODE_DEL if cmd.private == DELETE_MARKER else encode_to_bytes(cmd.private)
     cred = parse_cred(cmd.cred)
     if cred:
         if len(cred) > 1:
@@ -446,10 +476,11 @@ def setMsg(id, cmd, ignored):
     return pb.ClientMsg(set=pb.ClientSet(id=str(id), topic=cmd.topic,
         query=pb.SetQuery(
             desc=pb.SetDesc(default_acs=pb.DefaultAcsMode(auth=cmd.auth, anon=cmd.anon),
-                public=cmd.public, private=cmd.private),
+                public=cmd.public, private=cmd.private, trusted=parse_trusted(cmd.trusted)),
         sub=pb.SetSub(user_id=cmd.user, mode=cmd.mode),
         tags=cmd.tags.split(",") if cmd.tags else None,
-        cred=cred)), on_behalf_of=tn_globals.DefaultUser)
+        cred=cred)),
+        extra=pb.ClientExtra(on_behalf_of=tn_globals.DefaultUser))
 
 # {del}
 def delMsg(id, cmd, ignored):
@@ -536,7 +567,7 @@ def delMsg(id, cmd, ignored):
         stdoutln("Unrecognized delete option '", cmd.what, "'")
         return None
 
-    msg = pb.ClientMsg(on_behalf_of=tn_globals.DefaultUser)
+    msg = pb.ClientMsg(extra=pb.ClientExtra(on_behalf_of=tn_globals.DefaultUser))
     # Field named 'del' conflicts with the keyword 'del. This is a work around.
     xdel = getattr(msg, 'del')
     """
@@ -573,7 +604,8 @@ def noteMsg(id, cmd, ignored):
     elif what == 'recv':
         enum_what = pb.RECV
         cmd.seq = int(cmd.seq)
-    return pb.ClientMsg(note=pb.ClientNote(topic=cmd.topic, what=enum_what, seq_id=cmd.seq), on_behalf_of=tn_globals.DefaultUser)
+    return pb.ClientMsg(note=pb.ClientNote(topic=cmd.topic, what=enum_what, seq_id=cmd.seq),
+        extra=pb.ClientExtra(on_behalf_of=tn_globals.DefaultUser))
 
 # Upload file out of band over HTTP(S) (not gRPC).
 def upload(id, cmd, args):
@@ -596,7 +628,6 @@ def upload(id, cmd, args):
     return None
 
 
-
 # Given an array of parts, parse commands and arguments
 def parse_cmd(parts):
     parser = None
@@ -612,6 +643,8 @@ def parse_cmd(parts):
         parser.add_argument('--fn', default=None, help='user\'s human name')
         parser.add_argument('--photo', default=None, help='avatar file name')
         parser.add_argument('--private', default=None, help='user\'s private info')
+        parser.add_argument('--note', default=None, help='user\'s description')
+        parser.add_argument('--trusted', default=None, help='trusted markers: verified, staff, danger, prepend with rm- to remove, e.g. rm-verified')
         parser.add_argument('--auth', default=None, help='default access mode for authenticated users')
         parser.add_argument('--anon', default=None, help='default access mode for anonymous users')
         parser.add_argument('--cred', default=None, help='credentials, comma separated list in method:value format, e.g. email:test@example.com,tel:12345')
@@ -639,6 +672,8 @@ def parse_cmd(parts):
         parser.add_argument('--fn', default=None, help='topic\'s user-visible name')
         parser.add_argument('--photo', default=None, help='avatar file name')
         parser.add_argument('--private', default=None, help='topic\'s private info')
+        parser.add_argument('--note', default=None, help='topic\'s description')
+        parser.add_argument('--trusted', default=None, help='trusted markers: verified, staff, danger')
         parser.add_argument('--auth', default=None, help='default access mode for authenticated users')
         parser.add_argument('--anon', default=None, help='default access mode for anonymous users')
         parser.add_argument('--mode', default=None, help='new value of access mode')
@@ -673,8 +708,10 @@ def parse_cmd(parts):
         parser.add_argument('topic', help='topic to update')
         parser.add_argument('--fn', help='topic\'s title')
         parser.add_argument('--photo', help='avatar file name')
-        parser.add_argument('--public', help='topic\'s public info, alternative to fn+photo')
+        parser.add_argument('--public', help='topic\'s public info, alternative to fn+photo+note')
         parser.add_argument('--private', help='topic\'s private info')
+        parser.add_argument('--note', default=None, help='topic\'s description')
+        parser.add_argument('--trusted', default=None, help='trusted markers: verified, staff, danger')
         parser.add_argument('--auth', help='default access mode for authenticated users')
         parser.add_argument('--anon', help='default access mode for anonymous users')
         parser.add_argument('--user', help='ID of the account to update')
@@ -741,6 +778,10 @@ def parse_input(cmd):
     elif parts[0] == ".verbose":
         parser = argparse.ArgumentParser(prog=parts[0], description='Toggle logging verbosity')
 
+    elif parts[0] == ".delmark":
+        parser = argparse.ArgumentParser(prog=parts[0], description='Use custom delete maker instead of default DEL!')
+        parser.add_argument('delmark', help='marker to use')
+
     else:
         parser = parse_cmd(parts)
 
@@ -748,6 +789,7 @@ def parse_input(cmd):
         printout("Unrecognized:", parts[0])
         printout("Possible commands:")
         printout("\t.await\t\t- wait for completion of an operation")
+        printout("\t.delmark\t- custom delete marker to use instead of default DEL!")
         printout("\t.exit\t\t- exit the program (also .quit)")
         printout("\t.log\t\t- write value of a variable to stdout")
         printout("\t.must\t\t- wait for completion of an operation, terminate on failure")
@@ -815,26 +857,39 @@ def serialize_cmd(string, id, args):
         elif cmd.cmd == ".use":
             if cmd.user != "unchanged":
                 if cmd.user:
-                    tn_globals.DefaultUser = cmd.user
+                    if len(cmd.user) > 3 and cmd.user.startswith("usr"):
+                        tn_globals.DefaultUser = cmd.user
+                    else:
+                        stdoutln("Error: user ID '{}' is invalid".format(cmd.user))
                 else:
                     tn_globals.DefaultUser = None
-                stdoutln("Default user='" + cmd.user + "'")
+                stdoutln("Default user='{}'".format(tn_globals.DefaultUser))
+
             if cmd.topic != "unchanged":
                 if cmd.topic:
-                    tn_globals.DefaultTopic = cmd.topic
+                    if cmd.topic[:3] in ['me', 'fnd', 'sys', 'usr', 'grp', 'chn']:
+                        tn_globals.DefaultTopic = cmd.topic
+                    else:
+                        stdoutln("Error: topic '{}' is invalid".format(cmd.topic))
                 else:
                     tn_globals.DefaultTopic = None
-                stdoutln("Default topic='" + cmd.topic + "'")
+                stdoutln("Default topic='{}'".format(tn_globals.DefaultTopic))
+
             return None, None
 
         elif cmd.cmd == ".sleep":
-            stdoutln("Pausing for " + str(cmd.millis) + "ms...")
+            stdoutln("Pausing for {}ms...".format(cmd.millis))
             time.sleep(cmd.millis/1000.)
             return None, None
 
         elif cmd.cmd == ".verbose":
             tn_globals.Verbose = not tn_globals.Verbose
             stdoutln("Logging is {}".format("verbose" if tn_globals.Verbose else "normal"))
+            return None, None
+
+        elif cmd.cmd == ".delmark":
+            DELETE_MARKER = cmd.delmark
+            stdoutln("Using {} as delete marker".format(DELETE_MARKER))
             return None, None
 
         elif cmd.cmd == "upload":
@@ -856,6 +911,13 @@ def serialize_cmd(string, id, args):
     except Exception as err:
         stdoutln("Error in '{0}': {1}".format(cmd.cmd, err))
         return None, None
+
+def pop_from_output_queue():
+    if tn_globals.OutputQueue.empty():
+        return False
+    sys.stdout.write("\r<= "+tn_globals.OutputQueue.get())
+    sys.stdout.flush()
+    return True
 
 # Generator of protobuf messages.
 def gen_message(scheme, secret, args):
@@ -894,6 +956,9 @@ def gen_message(scheme, secret, args):
                 inp = tn_globals.InputQueue.popleft()
 
                 if inp == 'exit' or inp == 'quit' or inp == '.exit' or inp == '.quit':
+                    # Drain the output queue.
+                    while pop_from_output_queue():
+                        pass
                     return
 
                 pbMsg, cmd = serialize_cmd(inp, id, args)
@@ -918,8 +983,7 @@ def gen_message(scheme, secret, args):
                         yield pbMsg
 
             elif not tn_globals.OutputQueue.empty():
-                sys.stdout.write("\r<= "+tn_globals.OutputQueue.get())
-                sys.stdout.flush()
+                pop_from_output_queue()
                 print_prompt = tn_globals.IsInteractive
 
             else:
@@ -932,7 +996,10 @@ def gen_message(scheme, secret, args):
                         stdoutln("Timeout while waiting for '{0}' response".format(tn_globals.WaitingFor.cmd))
                         tn_globals.WaitingFor = None
 
-                time.sleep(0.1)
+                if tn_globals.IsInteractive:
+                    time.sleep(0.1)
+                else:
+                    time.sleep(0.01)
 
         except Exception as err:
             stdoutln("Exception in generator: {0}".format(err))
@@ -960,6 +1027,7 @@ def handle_ctrl(ctrl):
 
 # The main processing loop: send messages to server, receive responses.
 def run(args, schema, secret):
+    failed = False
     try:
         if tn_globals.IsInteractive:
             tn_globals.Prompt = PromptSession()
@@ -1029,14 +1097,17 @@ def run(args, schema, secret):
     except grpc.RpcError as err:
         # print(err)
         printerr("gRPC failed with {0}: {1}".format(err.code(), err.details()))
+        failed = True
     except Exception as ex:
         printerr("Request failed: {0}".format(ex))
-        # print(traceback.format_exc())
+        failed = True
     finally:
         printout('Shutting down...')
         channel.close()
         if tn_globals.InputThread != None:
             tn_globals.InputThread.join(0.3)
+
+    return 1 if failed else 0
 
 # Read cookie file for logging in with the cookie.
 def read_cookie():
@@ -1154,4 +1225,4 @@ if __name__ == '__main__':
     if args.background is None and not tn_globals.IsInteractive:
         args.background = True
 
-    run(args, schema, secret)
+    sys.exit(run(args, schema, secret))

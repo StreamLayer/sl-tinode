@@ -23,9 +23,9 @@ const (
 	defaultMinPasswordLength = 3
 )
 
-// Token suitable as a login: starts with a Unicode letter (class L) and contains Unicode letters (L),
-// numbers (N) and underscore.
-var loginPattern = regexp.MustCompile(`^\pL[_\pL\pN]+$`)
+// Token suitable as a login: starts and ends with a Unicode letter (class L) or number (class N),
+// contains Unicode letters, numbers, dot and underscore.
+var loginPattern = regexp.MustCompile(`^[\pL\pN][_.\pL\pN]*[\pL\pN]+$`)
 
 // authenticator is the type to map authentication methods to.
 type authenticator struct {
@@ -105,6 +105,11 @@ func (a *authenticator) Init(jsonconf json.RawMessage, name string) error {
 	return nil
 }
 
+// IsInitialized returns true if the handler is initialized.
+func (a *authenticator) IsInitialized() bool {
+	return a.name != ""
+}
+
 // AddRecord adds a basic authentication record to DB.
 func (a *authenticator) AddRecord(rec *auth.Rec, secret []byte, remoteAddr string) (*auth.Rec, error) {
 	uname, password, err := parseSecret(secret)
@@ -153,7 +158,7 @@ func (a *authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr st
 		return nil, err
 	}
 
-	login, _, _, _, err := store.Users.GetAuthRecord(rec.Uid, a.name)
+	login, authLevel, _, _, err := store.Users.GetAuthRecord(rec.Uid, a.name)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +191,7 @@ func (a *authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr st
 	if rec.Lifetime > 0 {
 		expires = types.TimeNow().Add(time.Duration(rec.Lifetime))
 	}
-	err = store.Users.UpdateAuthRecord(rec.Uid, auth.LevelAuth, a.name, uname, passhash, expires)
+	err = store.Users.UpdateAuthRecord(rec.Uid, authLevel, a.name, uname, passhash, expires)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +202,7 @@ func (a *authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr st
 		if tag == oldTag {
 			rec.Tags[i] = rec.Tags[len(rec.Tags)-1]
 			rec.Tags = rec.Tags[:len(rec.Tags)-1]
+
 			break
 		}
 	}
@@ -314,6 +320,13 @@ func (a *authenticator) GetResetParams(uid types.Uid) (map[string]interface{}, e
 	return params, nil
 }
 
+const realName = "basic"
+
+// GetRealName returns the hardcoded name of the authenticator.
+func (authenticator) GetRealName() string {
+	return realName
+}
+
 func init() {
-	store.RegisterAuthScheme("basic", &authenticator{})
+	store.RegisterAuthScheme(realName, &authenticator{})
 }

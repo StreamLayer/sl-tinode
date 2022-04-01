@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tinode/chat/server/auth"
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 )
@@ -43,7 +44,7 @@ type request struct {
 	Record     *auth.Rec `json:"rec,omitempty"`
 	Secret     []byte    `json:"secret,omitempty"`
 	RemoteAddr string    `json:"addr,omitempty"`
-	SdkKey 	   string    `json:"sdkKey,omitempty"`
+	SdkKey     string    `json:"sdkKey,omitempty"`
 }
 
 // User initialization data when creating a new user.
@@ -77,6 +78,10 @@ type response struct {
 
 // Init initializes the handler.
 func (a *authenticator) Init(jsonconf json.RawMessage, name string) error {
+	if name == "" {
+		return errors.New("auth_rest: authenticator name cannot be blank")
+	}
+
 	if a.name != "" {
 		return errors.New("auth_rest: already initialized as " + a.name + "; " + name)
 	}
@@ -98,7 +103,7 @@ func (a *authenticator) Init(jsonconf json.RawMessage, name string) error {
 
 	serverUrl, err := url.Parse(config.ServerUrl)
 	if err != nil || !serverUrl.IsAbs() {
-		return errors.New("auth_rest: invalid server_url")
+		return errors.New("auth_rest: invalid server_url '" + string(jsonconf) + "'")
 	}
 
 	if !strings.HasSuffix(serverUrl.Path, "/") {
@@ -132,6 +137,11 @@ func (a *authenticator) ResetSdkKey() error {
 	return nil
 }
 
+// IsInitialized returns true if the handler is initialized.
+func (a *authenticator) IsInitialized() bool {
+	return a.name != ""
+}
+
 // Execute HTTP POST to the server at the specified endpoint and with the provided payload.
 func (a *authenticator) callEndpoint(endpoint string, rec *auth.Rec, secret []byte, remoteAddr string) (*response, error) {
 	// Convert payload to json.
@@ -154,6 +164,11 @@ func (a *authenticator) callEndpoint(endpoint string, rec *auth.Rec, secret []by
 		return nil, err
 	}
 	defer post.Body.Close()
+
+	// Check HTTP status response. Must be 2xx.
+	if post.StatusCode < http.StatusOK || post.StatusCode >= http.StatusMultipleChoices {
+		return nil, errors.New("unexpected HTTP response " + post.Status)
+	}
 
 	// Read response.
 	body, err := ioutil.ReadAll(post.Body)
@@ -202,7 +217,7 @@ func (a *authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey st
 
 	// Auth record not found.
 	if resp.Record == nil {
-		log.Println("rest_auth: invalid response: missing Record")
+		logs.Warn.Println("rest_auth: invalid response: missing Record")
 		return nil, nil, types.ErrInternal
 	}
 
@@ -275,6 +290,7 @@ func (a *authenticator) GenSecret(rec *auth.Rec) ([]byte, time.Time, error) {
 
 // DelRecords deletes all authentication records for the given user.
 func (a *authenticator) DelRecords(uid types.Uid) error {
+	logs.Info.Println("DelRecords, initialized=", a.name != "")
 	_, err := a.callEndpoint("del", &auth.Rec{Uid: uid}, nil, "")
 	return err
 }
@@ -300,7 +316,7 @@ func (a *authenticator) RestrictedTags() ([]string, error) {
 	if len(resp.ByteVal) > 0 {
 		a.reToken, err = regexp.Compile(string(resp.ByteVal))
 		if err != nil {
-			log.Println("rest_auth: invalid token regexp", string(resp.ByteVal))
+			logs.Warn.Println("rest_auth: invalid token regexp", string(resp.ByteVal))
 		}
 	}
 	return resp.StrSliceVal, nil
@@ -313,6 +329,13 @@ func (authenticator) GetResetParams(uid types.Uid) (map[string]interface{}, erro
 	return nil, nil
 }
 
+const realName = "rest"
+
+// GetRealName returns the hardcoded name of the authenticator.
+func (authenticator) GetRealName() string {
+	return realName
+}
+
 func init() {
-	store.RegisterAuthScheme("rest", &authenticator{})
+	store.RegisterAuthScheme(realName, &authenticator{})
 }

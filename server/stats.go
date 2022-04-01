@@ -8,11 +8,13 @@ package main
 import (
 	"encoding/json"
 	"expvar"
-	"log"
 	"net/http"
 	"runtime"
 	"sort"
 	"time"
+
+	"github.com/tinode/chat/server/logs"
+	"github.com/tinode/chat/server/store"
 )
 
 // A simple implementation of histogram expvar.Var.
@@ -37,9 +39,8 @@ func (h *histogram) addSample(v float64) {
 func (h *histogram) String() string {
 	if r, err := json.Marshal(h); err == nil {
 		return string(r)
-	} else {
-		return ""
 	}
+	return ""
 }
 
 type varUpdate struct {
@@ -70,7 +71,13 @@ func statsInit(mux *http.ServeMux, path string) {
 
 	go statsUpdater()
 
-	log.Printf("stats: variables exposed at '%s'", path)
+	logs.Info.Printf("stats: variables exposed at '%s'", path)
+}
+
+func statsRegisterDbStats() {
+	if f := store.Store.DbStats(); f != nil {
+		expvar.Publish("DbStats", expvar.Func(f))
+	}
 }
 
 // Register integer variable. Don't check for initialization.
@@ -84,7 +91,8 @@ func statsRegisterHistogram(name string, bounds []float64) {
 	numBuckets := len(bounds) + 1
 	expvar.Publish(name, &histogram{
 		CountPerBucket: make([]int64, numBuckets),
-		Bounds:         bounds})
+		Bounds:         bounds,
+	})
 }
 
 // Async publish int variable.
@@ -126,7 +134,6 @@ func statsShutdown() {
 
 // The go routine which actually publishes stats updates.
 func statsUpdater() {
-
 	for upd := range globals.statsUpdate {
 		if upd == nil {
 			globals.statsUpdate = nil
@@ -148,12 +155,12 @@ func statsUpdater() {
 				val := upd.value.(float64)
 				v.addSample(val)
 			default:
-				log.Panicf("stats: unsupported expvar type %T", ev)
+				logs.Err.Panicf("stats: unsupported expvar type %T", ev)
 			}
 		} else {
 			panic("stats: update to unknown variable " + upd.varname)
 		}
 	}
 
-	log.Println("stats: shutdown")
+	logs.Info.Println("stats: shutdown")
 }

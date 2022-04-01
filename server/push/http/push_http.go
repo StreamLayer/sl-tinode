@@ -86,13 +86,14 @@ func messagePayload(payload *push.Payload) map[string]string {
 	data["ts"] = payload.Timestamp.Format(time.RFC3339)
 	data["seq"] = strconv.Itoa(payload.SeqId)
 	data["mime"] = payload.ContentType
-	data["content"], _ = drafty.ToPlainText(payload.Content)
+	data["content"], _ = drafty.PlainText(payload.Content)
 
 	return data
 }
 
 func sendPushToHttp(msg *push.Receipt, url string) {
 	log.Println("Prepare to sent HTTP push from: ", msg.Payload.From)
+	log.Println("organization: ", msg.OrganizationId)
 	msgM, _ := json.Marshal(msg)
 	log.Println("Push Message", string(msgM))
 
@@ -141,6 +142,7 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	* Send push through http
 	 */
 	log.Println("Sent HTTP push from: ", sender.Id, "to: ", recipientsIds)
+	log.Printf("Push payload: %v", data)
 	_, err := http.Post(url, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
 		log.Println("Http send push failed: ", err)

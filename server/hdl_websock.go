@@ -11,11 +11,11 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/tinode/chat/server/logs"
 )
 
 const (
@@ -54,13 +54,30 @@ func (sess *Session) readLoop() {
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure,
 				websocket.CloseNormalClosure) {
-				log.Println("ws: readLoop", sess.sid, err)
+				logs.Err.Println("ws: readLoop", sess.sid, err)
 			}
 			return
 		}
 		statsInc("IncomingMessagesWebsockTotal", 1)
 		sess.dispatchRaw(raw)
 	}
+}
+
+func (sess *Session) sendMessage(msg interface{}) bool {
+	if len(sess.send) > sendQueueLimit {
+		logs.Err.Println("ws: outbound queue limit exceeded", sess.sid)
+		return false
+	}
+
+	statsInc("OutgoingMessagesWebsockTotal", 1)
+	if err := wsWrite(sess.ws, websocket.TextMessage, msg); err != nil {
+		if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure,
+			websocket.CloseNormalClosure) {
+			logs.Err.Println("ws: writeLoop", sess.sid, err)
+		}
+		return false
+	}
+	return true
 }
 
 func (sess *Session) writeLoop() {
@@ -79,17 +96,23 @@ func (sess *Session) writeLoop() {
 				// Channel closed.
 				return
 			}
-			if len(sess.send) > sendQueueLimit {
-				log.Println("ws: outbound queue limit exceeded", sess.sid)
-				return
-			}
-			statsInc("OutgoingMessagesWebsockTotal", 1)
-			if err := wsWrite(sess.ws, websocket.TextMessage, msg); err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure,
-					websocket.CloseNormalClosure) {
-					log.Println("ws: writeLoop", sess.sid, err)
+			switch v := msg.(type) {
+			case []*ServerComMessage: // batch of unserialized messages
+				for _, msg := range v {
+					w := sess.serializeAndUpdateStats(msg)
+					if !sess.sendMessage(w) {
+						return
+					}
 				}
-				return
+			case *ServerComMessage: // single unserialized message
+				w := sess.serializeAndUpdateStats(v)
+				if !sess.sendMessage(w) {
+					return
+				}
+			default: // serialized message
+				if !sess.sendMessage(v) {
+					return
+				}
 			}
 
 		case <-sess.bkgTimer.C:
@@ -112,7 +135,7 @@ func (sess *Session) writeLoop() {
 			if err := wsWrite(sess.ws, websocket.PingMessage, nil); err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure,
 					websocket.CloseNormalClosure) {
-					log.Println("ws: writeLoop ping", sess.sid, err)
+					logs.Err.Println("ws: writeLoop ping", sess.sid, err)
 				}
 				return
 			}
@@ -132,7 +155,7 @@ func wsWrite(ws *websocket.Conn, mt int, msg interface{}) error {
 	return ws.WriteMessage(mt, bits)
 }
 
-// Handles websocket requests from peers
+// Handles websocket requests from peers.
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -146,23 +169,23 @@ func serveWebSocket(wrt http.ResponseWriter, req *http.Request) {
 	if isValid, _ := checkAPIKey(getAPIKey(req)); !isValid {
 		wrt.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(wrt).Encode(ErrAPIKeyRequired(now))
-		log.Println("ws: Missing, invalid or expired API key")
+		logs.Err.Println("ws: Missing, invalid or expired API key")
 		return
 	}
 
 	if req.Method != http.MethodGet {
 		wrt.WriteHeader(http.StatusMethodNotAllowed)
 		json.NewEncoder(wrt).Encode(ErrOperationNotAllowed("", "", now))
-		log.Println("ws: Invalid HTTP method", req.Method)
+		logs.Err.Println("ws: Invalid HTTP method", req.Method)
 		return
 	}
 
 	ws, err := upgrader.Upgrade(wrt, req, nil)
 	if _, ok := err.(websocket.HandshakeError); ok {
-		log.Println("ws: Not a websocket handshake")
+		logs.Err.Println("ws: Not a websocket handshake")
 		return
 	} else if err != nil {
-		log.Println("ws: failed to Upgrade ", err)
+		logs.Err.Println("ws: failed to Upgrade ", err)
 		return
 	}
 
@@ -174,7 +197,7 @@ func serveWebSocket(wrt http.ResponseWriter, req *http.Request) {
 		sess.remoteAddr = req.RemoteAddr
 	}
 
-	log.Println("ws: session started", sess.sid, sess.remoteAddr, count)
+	logs.Info.Println("ws: session started", sess.sid, sess.remoteAddr, count)
 
 	// Do work in goroutines to return from serveWebSocket() to release file pointers.
 	// Otherwise "too many open files" will happen.

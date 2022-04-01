@@ -13,11 +13,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
 )
@@ -25,7 +26,7 @@ import (
 func largeFileServe(wrt http.ResponseWriter, req *http.Request) {
 	now := types.TimeNow()
 	enc := json.NewEncoder(wrt)
-	mh := store.GetMediaHandler()
+	mh := store.Store.GetMediaHandler()
 	statsInc("FileDownloadsTotal", 1)
 
 	writeHttpResponse := func(msg *ServerComMessage, err error) {
@@ -34,7 +35,7 @@ func largeFileServe(wrt http.ResponseWriter, req *http.Request) {
 		wrt.WriteHeader(msg.Ctrl.Code)
 		enc.Encode(msg)
 		if err != nil {
-			log.Println("media serve", err)
+			logs.Warn.Println("media serve:", err)
 		}
 	}
 
@@ -60,17 +61,44 @@ func largeFileServe(wrt http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Check if media handler requests redirection to another service.
-	if redirTo, err := mh.Redirect(req.Method, req.URL.String()); redirTo != "" {
-		wrt.Header().Set("Location", redirTo)
-		wrt.Header().Set("Content-Type", "application/json; charset=utf-8")
-		wrt.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		wrt.WriteHeader(http.StatusTemporaryRedirect)
-		enc.Encode(InfoFound("", "", now))
-		log.Println("media serve redirected", redirTo)
+	// Check if this is a GET/OPTIONS/HEAD request.
+	if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions {
+		writeHttpResponse(ErrOperationNotAllowed("", "", now), errors.New("method '"+req.Method+"' not allowed"))
 		return
-	} else if err != nil {
+	}
+
+	// Check if media handler redirects or adds headers.
+	headers, statusCode, err := mh.Headers(req, true)
+	if err != nil {
 		writeHttpResponse(decodeStoreError(err, "", "", now, nil), err)
+		return
+	}
+
+	for name, values := range headers {
+		for _, value := range values {
+			wrt.Header().Add(name, value)
+		}
+	}
+
+	if statusCode != 0 {
+		// The handler requested to terminate further processing.
+		wrt.WriteHeader(statusCode)
+		if req.Method == http.MethodGet {
+			enc.Encode(&ServerComMessage{
+				Ctrl: &MsgServerCtrl{
+					Code:      statusCode,
+					Text:      http.StatusText(statusCode),
+					Timestamp: now,
+				},
+			})
+		}
+		logs.Info.Println("media serve: completed with status", statusCode)
+		return
+	}
+
+	if req.Method == http.MethodHead || req.Method == http.MethodOptions {
+		wrt.WriteHeader(http.StatusOK)
+		logs.Info.Println("media serve: completed", req.Method)
 		return
 	}
 
@@ -86,16 +114,14 @@ func largeFileServe(wrt http.ResponseWriter, req *http.Request) {
 	wrt.Header().Set("Content-Disposition", "attachment")
 	http.ServeContent(wrt, req, "", fd.UpdatedAt, rsc)
 
-	log.Println("media served OK")
+	logs.Info.Println("media serve: OK")
 }
 
 // largeFileReceive receives files from client over HTTP(S) and passes them to the configured media handler.
 func largeFileReceive(wrt http.ResponseWriter, req *http.Request) {
-	log.Println("Upload request", req.RequestURI)
-
 	now := types.TimeNow()
 	enc := json.NewEncoder(wrt)
-	mh := store.GetMediaHandler()
+	mh := store.Store.GetMediaHandler()
 	statsInc("FileUploadsTotal", 1)
 
 	writeHttpResponse := func(msg *ServerComMessage, err error) {
@@ -104,11 +130,12 @@ func largeFileReceive(wrt http.ResponseWriter, req *http.Request) {
 		wrt.WriteHeader(msg.Ctrl.Code)
 		enc.Encode(msg)
 
-		log.Println("media upload:", msg.Ctrl.Code, msg.Ctrl.Text, "/", err)
+		logs.Info.Println("media upload:", msg.Ctrl.Code, msg.Ctrl.Text, "/", err)
 	}
 
-	// Check if this is a POST or a PUT request.
-	if req.Method != http.MethodPost && req.Method != http.MethodPut {
+	// Check if this is a POST/PUT/OPTIONS/HEAD request.
+	if req.Method != http.MethodPost && req.Method != http.MethodPut &&
+		req.Method != http.MethodHead && req.Method != http.MethodOptions {
 		writeHttpResponse(ErrOperationNotAllowed("", "", now), errors.New("method '"+req.Method+"' not allowed"))
 		return
 	}
@@ -142,16 +169,37 @@ func largeFileReceive(wrt http.ResponseWriter, req *http.Request) {
 	}
 
 	// Check if uploads are handled elsewhere.
-	if redirTo, err := mh.Redirect(req.Method, req.URL.String()); redirTo != "" {
-		wrt.Header().Set("Location", redirTo)
-		wrt.Header().Set("Content-Type", "application/json; charset=utf-8")
-		wrt.WriteHeader(http.StatusTemporaryRedirect)
-		enc.Encode(InfoFound("", "", now))
-
-		log.Println("media upload redirected", redirTo)
-		return
-	} else if err != nil {
+	headers, statusCode, err := mh.Headers(req, false)
+	if err != nil {
 		writeHttpResponse(decodeStoreError(err, "", "", now, nil), err)
+		return
+	}
+
+	for name, values := range headers {
+		for _, value := range values {
+			wrt.Header().Add(name, value)
+		}
+	}
+
+	if statusCode != 0 {
+		// The handler requested to terminate further processing.
+		wrt.WriteHeader(statusCode)
+		if req.Method == http.MethodPost || req.Method == http.MethodPut {
+			enc.Encode(&ServerComMessage{
+				Ctrl: &MsgServerCtrl{
+					Code:      statusCode,
+					Text:      http.StatusText(statusCode),
+					Timestamp: now,
+				},
+			})
+		}
+		logs.Info.Println("media upload: completed with status", statusCode)
+		return
+	}
+
+	if req.Method == http.MethodHead || req.Method == http.MethodOptions {
+		wrt.WriteHeader(http.StatusOK)
+		logs.Info.Println("media upload: completed", req.Method)
 		return
 	}
 
@@ -164,42 +212,66 @@ func largeFileReceive(wrt http.ResponseWriter, req *http.Request) {
 		}
 		return
 	}
-	fdef := types.FileDef{}
-	fdef.Id = store.GetUidString()
-	fdef.InitTimes()
-	fdef.User = uid.String()
 
 	buff := make([]byte, 512)
 	if _, err = file.Read(buff); err != nil {
 		writeHttpResponse(ErrUnknown(msgID, "", now), err)
 		return
 	}
+	fdef := &types.FileDef{
+		ObjHeader: types.ObjHeader{
+			Id: store.Store.GetUidString(),
+		},
+		User:     uid.String(),
+		MimeType: http.DetectContentType(buff),
+	}
+	fdef.InitTimes()
 
-	fdef.MimeType = http.DetectContentType(buff)
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		writeHttpResponse(ErrUnknown(msgID, "", now), err)
 		return
 	}
 
-	url, err := mh.Upload(&fdef, file)
+	url, size, err := mh.Upload(fdef, file)
 	if err != nil {
+		logs.Info.Println("Upload failed", file, "key", fdef.Location, err)
+		store.Files.FinishUpload(fdef, false, 0)
 		writeHttpResponse(decodeStoreError(err, msgID, "", now, nil), err)
 		return
 	}
 
-	writeHttpResponse(NoErrParams(msgID, "", now, map[string]string{"url": url}), nil)
+	fdef, err = store.Files.FinishUpload(fdef, true, size)
+	if err != nil {
+		logs.Info.Println("Upload failed", file, "key", fdef.Location, err)
+		// Best effort cleanup.
+		mh.Delete([]string{fdef.Location})
+		writeHttpResponse(decodeStoreError(err, msgID, "", now, nil), err)
+		return
+	}
+
+	params := map[string]string{"url": url}
+	if globals.mediaGcPeriod > 0 {
+		// How long this file is guaranteed to exist without being attached to a message or a topic.
+		params["expires"] = now.Add(globals.mediaGcPeriod).Format(types.TimeFormatRFC3339)
+	}
+	writeHttpResponse(NoErrParams(msgID, "", now, params), nil)
 }
 
-func largeFileRunGarbageCollection(period time.Duration, block int) chan<- bool {
-	// Unbuffered stop channel. Whoever stops it must wait for the process to finish.
+// largeFileRunGarbageCollection runs every 'period' and deletes up to 'blockSize' unused files.
+// Returns channel which can be used to stop the process.
+func largeFileRunGarbageCollection(period time.Duration, blockSize int) chan<- bool {
+	// Unbuffered stop channel. Whomever stops the gc must wait for the process to finish.
 	stop := make(chan bool)
 	go func() {
-		gcTimer := time.Tick(period)
+		// Add some randomness to the tick period to desynchronize runs on cluster nodes:
+		// 0.75 * period + rand(0, 0.5) * period.
+		period = (period >> 1) + (period >> 2) + time.Duration(rand.Intn(int(period>>1)))
+		gcTicker := time.Tick(period)
 		for {
 			select {
-			case <-gcTimer:
-				if err := store.Files.DeleteUnused(time.Now().Add(-time.Hour), block); err != nil {
-					log.Println("media gc:", err)
+			case <-gcTicker:
+				if err := store.Files.DeleteUnused(time.Now().Add(-time.Hour), blockSize); err != nil {
+					logs.Warn.Println("media gc:", err)
 				}
 			case <-stop:
 				return

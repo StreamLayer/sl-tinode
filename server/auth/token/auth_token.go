@@ -40,6 +40,10 @@ type tokenLayout struct {
 
 // Init initializes the authenticator: parses the config and sets salt, serial number and lifetime.
 func (ta *authenticator) Init(jsonconf json.RawMessage, name string) error {
+	if name == "" {
+		return errors.New("auth_token: authenticator name cannot be blank")
+	}
+
 	if ta.name != "" {
 		return errors.New("auth_token: already initialized as " + ta.name + "; " + name)
 	}
@@ -70,6 +74,11 @@ func (ta *authenticator) Init(jsonconf json.RawMessage, name string) error {
 	ta.serialNumber = config.SerialNum
 
 	return nil
+}
+
+// IsInitialized returns true if the handler is initialized.
+func (ta *authenticator) IsInitialized() bool {
+	return ta.name != ""
 }
 
 // AddRecord is not supprted, will produce an error.
@@ -183,6 +192,13 @@ func (authenticator) GetResetParams(uid types.Uid) (map[string]interface{}, erro
 	return nil, nil
 }
 
+const realName = "token"
+
+// GetRealName returns the hardcoded name of the authenticator.
+func (authenticator) GetRealName() string {
+	return realName
+}
+
 func init() {
-	store.RegisterAuthScheme("token", &authenticator{})
+	store.RegisterAuthScheme(realName, &authenticator{})
 }

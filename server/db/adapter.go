@@ -34,6 +34,8 @@ type Adapter interface {
 	UpgradeDb() error
 	// Version returns adapter version
 	Version() int
+	// DB connection stats object.
+	Stats() interface{}
 
 	// User management
 
@@ -83,7 +85,7 @@ type Adapter interface {
 	AuthDelScheme(user t.Uid, scheme string) error
 	// AuthDelAllRecords deletes all records of a given user.
 	AuthDelAllRecords(uid t.Uid) (int, error)
-	// AuthUpdRecord modifies an authentication record.
+	// AuthUpdRecord modifies an authentication record. Only non-default/non-zero values are updated.
 	AuthUpdRecord(user t.Uid, scheme, unique string, authLvl auth.Level, secret []byte, expires time.Time) error
 
 	// Topic management
@@ -95,11 +97,20 @@ type Adapter interface {
 	// TopicGet loads a single topic by name, if it exists. If the topic does not exist the call returns (nil, nil)
 	TopicGet(topic string) (*t.Topic, error)
 	// TopicsForUser loads subscriptions for a given user. Reads public value.
+	// When the 'opts.IfModifiedSince' query is not nil the subscriptions with UpdatedAt > opts.IfModifiedSince
+	// are returned, where UpdatedAt can be either a subscription, a topic, or a user update timestamp.
+	// This is need in order to support paginagion of subscriptions: get subscriptions page by page
+	// from the oldest updates to most recent:
+	// 1. Client already has subscriptions with the latest update timestamp X.
+	// 2. Client asks for N updated subscriptions since X. The server returns N with updates between X and Y.
+	// 3. Client goes to step 1 with X := Y.
 	TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) ([]t.Subscription, error)
 	// UsersForTopic loads users' subscriptions for a given topic. Public is loaded.
 	UsersForTopic(topic string, keepDeleted bool, opts *t.QueryOpt) ([]t.Subscription, error)
 	// OwnTopics loads a slice of topic names where the user is the owner.
 	OwnTopics(uid t.Uid) ([]string, error)
+	// ChannelsForUser loads a slice of topic names where the user is a channel reader and notifications (P) are enabled.
+	ChannelsForUser(uid t.Uid) ([]string, error)
 	// TopicShare creates topc subscriptions
 	TopicShare(subs []*t.Subscription) error
 	// TopicDelete deletes topic, subscription, messages
@@ -113,19 +124,16 @@ type Adapter interface {
 	// Topic subscriptions
 
 	// SubscriptionGet reads a subscription of a user to a topic
-	SubscriptionGet(topic string, user t.Uid) (*t.Subscription, error)
-	// SubsForUser gets a list of topics of interest for a given user. Does NOT load Public value.
-	SubsForUser(user t.Uid, keepDeleted bool, opts *t.QueryOpt) ([]t.Subscription, error)
+	SubscriptionGet(topic string, user t.Uid, keepDeleted bool) (*t.Subscription, error)
+	// SubsForUser loads all subscriptions of a given user. Does NOT load Public or Private values,
+	// does not load deleted subscriptions.
+	SubsForUser(user t.Uid) ([]t.Subscription, error)
 	// SubsForTopic gets a list of subscriptions to a given topic.. Does NOT load Public value.
 	SubsForTopic(topic string, keepDeleted bool, opts *t.QueryOpt) ([]t.Subscription, error)
 	// SubsUpdate updates pasrt of a subscription object. Pass nil for fields which don't need to be updated
 	SubsUpdate(topic string, user t.Uid, update map[string]interface{}) error
 	// SubsDelete deletes a single subscription
 	SubsDelete(topic string, user t.Uid) error
-	// SubsDelForTopic deletes all subscriptions to the given topic
-	SubsDelForTopic(topic string, hard bool) error
-	// SubsDelForUser deletes or marks as deleted all subscriptions of the given user.
-	SubsDelForUser(user t.Uid, hard bool) error
 
 	// Search
 
@@ -145,8 +153,6 @@ type Adapter interface {
 	MessageDeleteList(topic string, toDel *t.DelMessage) error
 	// MessageGetDeleted returns a list of deleted message Ids.
 	MessageGetDeleted(topic string, forUser t.Uid, opts *t.QueryOpt) ([]t.DelMessage, error)
-	// MessageAttachments connects given message to a list of file record IDs.
-	MessageAttachments(msgId t.Uid, fids []string) error
 
 	// Devices (for push notifications)
 
@@ -159,14 +165,16 @@ type Adapter interface {
 
 	// File upload records. The files are stored outside of the database.
 
-	// FileStartUpload initializes a file upload
+	// FileStartUpload initializes a file upload.
 	FileStartUpload(fd *t.FileDef) error
 	// FileFinishUpload marks file upload as completed, successfully or otherwise.
-	FileFinishUpload(fid string, status int, size int64) (*t.FileDef, error)
+	FileFinishUpload(fd *t.FileDef, success bool, size int64) (*t.FileDef, error)
 	// FileGet fetches a record of a specific file
 	FileGet(fid string) (*t.FileDef, error)
 	// FileDeleteUnused deletes records where UseCount is zero. If olderThan is non-zero, deletes
 	// unused records with UpdatedAt before olderThan.
 	// Returns array of FileDef.Location of deleted filerecords so actual files can be deleted too.
 	FileDeleteUnused(olderThan time.Time, limit int) ([]string, error)
+	// FileLinkAttachments connects given topic or message to the file record IDs from the list.
+	FileLinkAttachments(topic string, userId, msgId t.Uid, fids []string) error
 }
