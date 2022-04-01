@@ -6,7 +6,7 @@ set -ex
 # usage "./build-custom.sh tag=v0.15.9"
 goplat=( linux )
 goarc=( amd64 )
-dbtags=( rethinkdb, mongodb )
+dbtags=( rethinkdb  mongodb )
 releasepath="./docker/tinode/releases"
 repository="gcr.io/peak-orbit-214114"
 
