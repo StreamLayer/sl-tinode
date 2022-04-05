@@ -122,7 +122,12 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 		recipients[r.Id] = user
 	}
 	for uid, to := range msg.To {
-		recipients[uid.String()]["device"] = to
+		recipientId := uid.String()
+		if recipients[recipientId] != nil {
+			recipients[recipientId]["device"] = to
+		} else {
+			log.Println("recipient skipped: ", recipientId)
+		}
 	}
 
 	/*
