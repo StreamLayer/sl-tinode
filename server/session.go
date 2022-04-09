@@ -1277,11 +1277,11 @@ func (s *Session) note(msg *ClientComMessage) {
 		}
 
 		select {
-		case sub.broadcast <- data:
+		case globals.hub.routeCli <- data:
 		default:
 			// Reply with a 500 to the user.
 			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
-			logs.Err.Println("s.note: sub.broacast channel full, topic ", msg.RcptTo, s.sid)
+			logs.Err.Println("s.note: hub.route channel full", s.sid)
 		}
 	} else {
 		s.queueOut(ErrAttachFirst(msg, msg.Timestamp))
