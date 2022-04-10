@@ -1058,6 +1058,10 @@ func (t *Topic) handleNoteBroadcast(msg *ClientComMessage) {
 		return
 	}
 
+	if (msg.Note.What == "bypass" || msg.Note.What == "reaction") && (!mode.IsWriter() || t.isReadOnly()) {
+		return
+	}
+
 	var read, recv, unread, seq int
 
 	if msg.Note.What == "read" {
@@ -1129,10 +1133,11 @@ func (t *Topic) handleNoteBroadcast(msg *ClientComMessage) {
 
 	info := &ServerComMessage{
 		Info: &MsgServerInfo{
-			Topic: msg.Original,
-			From:  msg.AsUser,
-			What:  msg.Note.What,
-			SeqId: msg.Note.SeqId,
+			Topic:   msg.Original,
+			From:    msg.AsUser,
+			What:    msg.Note.What,
+			SeqId:   msg.Note.SeqId,
+			Content: msg.Note.Content,
 		},
 		RcptTo:    msg.RcptTo,
 		AsUser:    msg.AsUser,

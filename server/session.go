@@ -1247,37 +1247,12 @@ func (s *Session) note(msg *ClientComMessage) {
 			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
 			logs.Err.Println("s.note: sub.broacast channel full, topic ", msg.RcptTo, s.sid)
 		}
-	} else if msg.Note.What == "recv" {
+	} else if msg.Note.What == "recv" || msg.Note.What == "bypass" || msg.Note.What == "reaction" {
 		// Client received a pres notification about a new message, initiated a fetch
 		// from the server (and detached from the topic) and acknowledges receipt.
 		// Hub will forward to topic, if appropriate.
 		select {
 		case globals.hub.routeCli <- msg:
-		default:
-			// Reply with a 500 to the user.
-			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
-			logs.Err.Println("s.note: hub.route channel full", s.sid)
-		}
-	} else if msg.Note.What == "bypass" || msg.Note.What == "reaction" {
-		// Client received a pres notification about a new message, initiated a fetch
-		// from the server (and detached from the topic) and acknowledges receipt.
-		// Hub will forward to topic, if appropriate.
-		data := &ClientComMessage{
-			Info: &MsgServerInfo{
-				Topic:   msg.Original,
-				From:    msg.AsUser,
-				What:    msg.Note.What,
-				SeqId:   msg.Note.SeqId,
-				Content: msg.Note.Content,
-			},
-			RcptTo:    msg.RcptTo,
-			AsUser:    msg.AsUser,
-			Timestamp: msg.Timestamp,
-			sess:      s,
-		}
-
-		select {
-		case globals.hub.routeCli <- data:
 		default:
 			// Reply with a 500 to the user.
 			s.queueOut(ErrUnknownReply(msg, msg.Timestamp))
