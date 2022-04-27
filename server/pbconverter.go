@@ -861,7 +861,7 @@ func pbTopicDescDeserialize(desc *pbx.TopicDesc) *MsgTopicDesc {
 	return out
 }
 
-func pbTopicSerialize(topic *Topic) *pbx.TopicDesc {
+func pbTopicSerializeToDesc(topic *Topic) *pbx.TopicDesc {
 	if topic == nil {
 		return nil
 	}

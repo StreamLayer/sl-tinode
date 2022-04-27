@@ -648,6 +648,7 @@ func (t *Topic) presSingleUserOffline(uid types.Uid, mode types.AccessMode,
 
 	// ModeInvalid means the user is deleted (pud.deleted == true)
 	if mode != types.ModeInvalid && presOfflineFilter(mode, what, nil) {
+
 		user := uid.UserId()
 		actor := params.actor
 		target := params.target
