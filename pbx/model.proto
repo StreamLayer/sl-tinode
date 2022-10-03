@@ -262,6 +262,8 @@ enum InfoNote {
 	RECV = 2;
 	KP = 3;
 	CALL = 4;
+	BYPASS = 5;
+	REACTION = 6;
 }
 
 enum CallEvent {
@@ -274,8 +276,6 @@ enum CallEvent {
 	INVITE = 5;
 	OFFER = 6;
 	RINGING = 7;
-	BYPASS = 8;
-	REACTION = 9;
 }
 
 // ClientNote is a client-generated notification for topic subscribers

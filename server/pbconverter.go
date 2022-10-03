@@ -774,10 +774,6 @@ func pbCallEventSerialize(event string) pbx.CallEvent {
 		out = pbx.CallEvent_OFFER
 	case "ringing":
 		out = pbx.CallEvent_RINGING
-	case "bypass":
-		out = pbx.CallEvent_BYPASS
-	case "reaction":
-		out = pbx.CallEvent_REACTION
 	default:
 		logs.Info.Println("unknown info-note.event", event)
 	}
@@ -801,10 +797,6 @@ func pbCallEventDeserialize(event pbx.CallEvent) string {
 		out = "offer"
 	case pbx.CallEvent_RINGING:
 		out = "ringing"
-	case pbx.CallEvent_BYPASS:
-		out = "bypass"
-	case pbx.CallEvent_REACTION:
-		out = "reaction"
 	default:
 	}
 	return out

@@ -37,23 +37,23 @@ type configType struct {
 }
 
 // Init initializes the handler
-func (httpPush) Init(jsonconf string) error {
+func (httpPush) Init(jsonconf json.RawMessage) (bool, error) {
 	log.Printf("Init HTTP push")
 
 	// Check if the handler is already initialized
 	if handler.initialized {
-		return errors.New("already initialized")
+		return false, errors.New("already initialized")
 	}
 
 	var config configType
 	if err := json.Unmarshal([]byte(jsonconf), &config); err != nil {
-		return errors.New("failed to parse config: " + err.Error())
+		return false, errors.New("failed to parse config: " + err.Error())
 	}
 
 	handler.initialized = true
 
 	if !config.Enabled {
-		return nil
+		return false, nil
 	}
 
 	if config.Buffer <= 0 {
@@ -75,7 +75,7 @@ func (httpPush) Init(jsonconf string) error {
 	}()
 
 	log.Printf("Initialized HTTP push")
-	return nil
+	return true, nil
 }
 
 func messagePayload(payload *push.Payload) map[string]string {

@@ -10,6 +10,7 @@ package main
 import (
 	"time"
 
+	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/push"
 	"github.com/tinode/chat/server/store/types"
 )
@@ -24,14 +25,15 @@ func (t *Topic) channelSubUnsub(uid types.Uid, sub bool) {
 }
 
 // Prepares a payload to be delivered to a mobile device as a push notification in response to a {data} message.
-func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receipt {
+func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData, organizationId string) *push.Receipt {
 	// Passing `Topic` as `t.name` for group topics and P2P topics. The p2p topic name is later rewritten for
 	// each recipient then the payload is created: p2p recipient sees the topic as the ID of the other user.
 
 	// Initialize the push receipt.
 	contentType, _ := data.Head["mime"].(string)
 	receipt := push.Receipt{
-		To: make(map[types.Uid]push.Recipient, t.subsCount()),
+		To:             make(map[types.Uid]push.Recipient, t.subsCount()),
+		OrganizationId: organizationId,
 		Payload: push.Payload{
 			What:        push.ActMsg,
 			Silent:      false,
@@ -43,9 +45,13 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receip
 			Content:     data.Content,
 		},
 	}
+
+	logs.Warn.Printf("receipt[%s] %v", organizationId, receipt)
+
 	if webrtc, found := data.Head["webrtc"].(string); found {
 		receipt.Payload.Webrtc = webrtc
 	}
+
 	if replace, found := data.Head["replace"].(string); found {
 		receipt.Payload.Replace = replace
 	}
@@ -79,7 +85,7 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData) *push.Receip
 	return nil
 }
 
-func (t *Topic) preparePushForSubReceipt(fromUid types.Uid, now time.Time) *push.Receipt {
+func (t *Topic) preparePushForSubReceipt(fromUid types.Uid, now time.Time, organizationId string) *push.Receipt {
 	// The `Topic` in the push receipt is `t.xoriginal` for group topics, `fromUid` for p2p topics,
 	// not the t.original(fromUid) because it's the topic name as seen by the recipient, not by the sender.
 	topic := t.xoriginal
@@ -89,7 +95,8 @@ func (t *Topic) preparePushForSubReceipt(fromUid types.Uid, now time.Time) *push
 
 	// Initialize the push receipt.
 	receipt := &push.Receipt{
-		To: make(map[types.Uid]push.Recipient, t.subsCount()),
+		To:             make(map[types.Uid]push.Recipient, t.subsCount()),
+		OrganizationId: organizationId,
 		Payload: push.Payload{
 			What:      push.ActSub,
 			Silent:    false,
@@ -103,8 +110,8 @@ func (t *Topic) preparePushForSubReceipt(fromUid types.Uid, now time.Time) *push
 }
 
 // Prepares payload to be delivered to a mobile device as a push notification in response to a new subscription in a p2p topic.
-func (t *Topic) pushForP2PSub(fromUid, toUid types.Uid, want, given types.AccessMode, now time.Time) *push.Receipt {
-	receipt := t.preparePushForSubReceipt(fromUid, now)
+func (t *Topic) pushForP2PSub(fromUid, toUid types.Uid, want, given types.AccessMode, now time.Time, organizationId string) *push.Receipt {
+	receipt := t.preparePushForSubReceipt(fromUid, now, organizationId)
 	receipt.Payload.ModeWant = want
 	receipt.Payload.ModeGiven = given
 
@@ -114,8 +121,8 @@ func (t *Topic) pushForP2PSub(fromUid, toUid types.Uid, want, given types.Access
 }
 
 // Prepares payload to be delivered to a mobile device as a push notification in response to a new subscription in a group topic.
-func (t *Topic) pushForGroupSub(fromUid types.Uid, now time.Time) *push.Receipt {
-	receipt := t.preparePushForSubReceipt(fromUid, now)
+func (t *Topic) pushForGroupSub(fromUid types.Uid, now time.Time, organizationId string) *push.Receipt {
+	receipt := t.preparePushForSubReceipt(fromUid, now, organizationId)
 	if pud, ok := t.perUser[fromUid]; ok {
 		receipt.Payload.ModeWant = pud.modeWant
 		receipt.Payload.ModeGiven = pud.modeGiven
