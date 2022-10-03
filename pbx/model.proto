@@ -288,11 +288,11 @@ message ClientNote {
 	int32 seq_id = 3;
 	bytes content = 4;
 	// Client's count of unread messages to report back to the server. Used in push notifications on iOS.
-	int32 unread = 4;
+	int32 unread = 5;
 	// Call event.
-	CallEvent event = 5;
+	CallEvent event = 6;
 	// Arbitrary json payload (used in video calls).
-	bytes payload = 6;
+	bytes payload = 7;
 }
 
 message ClientExtra {
