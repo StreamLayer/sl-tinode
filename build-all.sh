@@ -62,7 +62,8 @@ then
 
   cp ./server/static/img/*.png ./releases/tmp/static/img
   cp ./server/static/img/*.svg ./releases/tmp/static/img
-  cp ./server/static/audio/*.mp3 ./releases/tmp/static/audio
+  cp ./server/static/img/*.jpeg ./releases/tmp/static/img
+  cp ./server/static/audio/*.m4a ./releases/tmp/static/audio
   cp ./server/static/css/*.css ./releases/tmp/static/css
   cp ./server/static/index.html ./releases/tmp/static
   cp ./server/static/index-dev.html ./releases/tmp/static
@@ -85,7 +86,7 @@ do
   rm -f ./releases/tmp/keygen*
 
   # Keygen is database-independent
-  env GOOS="${plat}" GOARCH="${arc}" go build -ldflags "-s -w" -o ./releases/tmp ./keygen > /dev/null
+  env GOOS="${plat}" GOARCH="${arc}" go build -ldflags "-s -w" -o ./releases/tmp/keygen ./keygen > /dev/null
 
   for dbtag in "${dbtags[@]}"
   do

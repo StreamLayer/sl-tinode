@@ -15,6 +15,8 @@ const (
 	ActMsg = "msg"
 	// New subscription.
 	ActSub = "sub"
+	// Messages read: clear unread count.
+	ActRead = "read"
 )
 
 // MaxPayloadLength is the maximum length of push payload in multibyte characters.
@@ -76,10 +78,15 @@ type Payload struct {
 	ContentType string `json:"mime"`
 	// Actual Data.Content of the message, if requested
 	Content interface{} `json:"content,omitempty"`
+	// State of the video call (available in video call messages only).
+	Webrtc string `json:"webrtc,omitempty"`
+	// Seq id the message is supposed to replace.
+	Replace string `json:"replace,omitempty"`
 
-	// New subscription notification
+	// Subscription change notification.
 
-	// Access mode when notifying of new subscriptions.
+	// New access mode when notifying of a subscription change.
+	// ModeNone for both means the subscription is removed.
 	ModeWant  t.AccessMode `json:"want,omitempty"`
 	ModeGiven t.AccessMode `json:"given,omitempty"`
 	// Message head with custom parameters
@@ -89,7 +96,7 @@ type Payload struct {
 // Handler is an interface which must be implemented by handlers.
 type Handler interface {
 	// Init initializes the handler.
-	Init(jsonconf string) error
+	Init(jsonconf json.RawMessage) (bool, error)
 
 	// IsReady сhecks if the handler is initialized.
 	IsReady() bool
@@ -128,22 +135,25 @@ func Register(name string, hnd Handler) {
 }
 
 // Init initializes registered handlers.
-func Init(jsconfig string) error {
+func Init(jsconfig json.RawMessage) ([]string, error) {
 	var config []configType
 
-	if err := json.Unmarshal([]byte(jsconfig), &config); err != nil {
-		return errors.New("failed to parse config: " + err.Error())
+	if err := json.Unmarshal(jsconfig, &config); err != nil {
+		return nil, errors.New("failed to parse config: " + err.Error())
 	}
 
+	var enabled []string
 	for _, cc := range config {
 		if hnd := handlers[cc.Name]; hnd != nil {
-			if err := hnd.Init(string(cc.Config)); err != nil {
-				return err
+			if ok, err := hnd.Init(cc.Config); err != nil {
+				return nil, err
+			} else if ok {
+				enabled = append(enabled, cc.Name)
 			}
 		}
 	}
 
-	return nil
+	return enabled, nil
 }
 
 // Push a single message to devices.

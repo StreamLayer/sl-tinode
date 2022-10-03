@@ -61,9 +61,9 @@ import (
 
 const (
 	// currentVersion is the current API/protocol version
-	currentVersion = "0.18"
+	currentVersion = "0.20"
 	// minSupportedVersion is the minimum supported API version
-	minSupportedVersion = "0.16"
+	minSupportedVersion = "0.17"
 
 	// idleSessionTimeout defines duration of being idle before terminating a session.
 	idleSessionTimeout = time.Second * 55
@@ -105,6 +105,9 @@ const (
 	// Default country code to fall back to if the "default_country_code" field
 	// isn't specified in the config.
 	defaultCountryCode = "US"
+
+	// Default timeout to drop an unanswered call, seconds.
+	defaultCallEstablishmentTimeout = 30
 )
 
 // Build version number defined by the compiler:
@@ -177,8 +180,15 @@ var globals struct {
 
 	// Country code to assign to sessions by default.
 	defaultCountryCode string
+
+	// Time before the call is dropped if not answered.
+	callEstablishmentTimeout int
+
+	// ICE servers config (video calling)
+	iceServers []iceServer
 }
 
+// Credential validator config.
 type validatorConfig struct {
 	// TRUE or FALSE to set
 	AddToTags bool `json:"add_to_tags"`
@@ -188,6 +198,7 @@ type validatorConfig struct {
 	Config json.RawMessage `json:"config"`
 }
 
+// Large file handler config.
 type mediaConfig struct {
 	// The name of the handler to use for file uploads.
 	UseHandler string `json:"use_handler"`
@@ -256,6 +267,7 @@ type configType struct {
 	Auth      map[string]json.RawMessage  `json:"auth_config"`
 	Validator map[string]*validatorConfig `json:"acc_validation"`
 	Media     *mediaConfig                `json:"media"`
+	WebRTC    json.RawMessage             `json:"webrtc"`
 }
 
 func main() {
@@ -534,7 +546,7 @@ func main() {
 		}
 	}
 
-	err = push.Init(string(config.Push))
+	pushHandlers, err := push.Init(config.Push)
 	if err != nil {
 		logs.Err.Fatal("Failed to initialize push notifications:", err)
 	}
@@ -542,6 +554,11 @@ func main() {
 		push.Stop()
 		logs.Info.Println("Stopped push notifications")
 	}()
+	logs.Info.Println("Push handlers configured:", pushHandlers)
+
+	if err = initVideoCalls(config.WebRTC); err != nil {
+		logs.Err.Fatal("Failed to init video calls: %w", err)
+	}
 
 	// Keep inactive LP sessions for 15 seconds
 	globals.sessionStore = NewSessionStore(idleSessionTimeout + 15*time.Second)

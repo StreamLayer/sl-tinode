@@ -532,12 +532,12 @@ func (a *adapter) CreateDb(reset bool) error {
 	// Links between uploaded files and the topics, users or messages they are attached to.
 	if _, err = tx.Exec(
 		`CREATE TABLE filemsglinks(
-			id			INT NOT NULL AUTO_INCREMENT,
-			createdat	DATETIME(3) NOT NULL,
-			fileid		BIGINT NOT NULL,
-			msgid		INT,
-			topic		CHAR(25),
-			userid		BIGINT,
+			id        INT NOT NULL AUTO_INCREMENT,
+			createdat DATETIME(3) NOT NULL,
+			fileid    BIGINT NOT NULL,
+			msgid     INT,
+			topic     CHAR(25),
+			userid    BIGINT,
 			PRIMARY KEY(id),
 			FOREIGN KEY(fileid) REFERENCES fileuploads(id) ON DELETE CASCADE,
 			FOREIGN KEY(msgid) REFERENCES messages(id) ON DELETE CASCADE,
@@ -1163,7 +1163,7 @@ func (a *adapter) UserDelete(uid t.Uid, hard bool) error {
 		// Disable the other user's subscription to a disabled p2p topic.
 		if _, err = tx.Exec("UPDATE subscriptions AS s_one LEFT JOIN subscriptions AS s_two "+
 			"ON s_one.topic=s_two.topic "+
-			"SET s_two.updatedat=?, s_two.deletedat=? WHERE s_one.userid=?",
+			"SET s_two.updatedat=?, s_two.deletedat=? WHERE s_one.userid=? AND s_one.topic LIKE 'p2p%'",
 			now, now, decoded_uid); err != nil {
 			return err
 		}
@@ -1921,7 +1921,7 @@ func (a *adapter) TopicShare(shares []*t.Subscription) error {
 }
 
 // TopicDelete deletes specified topic.
-func (a *adapter) TopicDelete(topic string, hard bool) error {
+func (a *adapter) TopicDelete(topic string, isChan, hard bool) error {
 	ctx, cancel := a.getContextForTx()
 	if cancel != nil {
 		defer cancel()
@@ -1937,8 +1937,17 @@ func (a *adapter) TopicDelete(topic string, hard bool) error {
 		}
 	}()
 
+	// If the topic is a channel, must try to delete subscriptions under both grpXXX and chnXXX names.
+	args := []interface{}{topic}
+	if isChan {
+		args = append(args, t.GrpToChn(topic))
+	}
+
 	if hard {
-		if _, err = tx.Exec("DELETE FROM subscriptions WHERE topic=?", topic); err != nil {
+		// Delete subscriptions. If this is a channel, delete both group subscriptions and channel subscriptions.
+		q, args, _ := sqlx.In("DELETE FROM subscriptions WHERE topic IN (?)", args)
+		q = tx.Rebind(q)
+		if _, err = tx.Exec(q, args...); err != nil {
 			return err
 		}
 
@@ -1955,8 +1964,10 @@ func (a *adapter) TopicDelete(topic string, hard bool) error {
 		}
 	} else {
 		now := t.TimeNow()
-		if _, err = tx.Exec("UPDATE subscriptions SET updatedat=?,deletedat=? WHERE topic=?",
-			now, now, topic); err != nil {
+
+		q, args, _ := sqlx.In("UPDATE subscriptions SET updatedat=?,deletedat=? WHERE topic IN (?)", now, now, args)
+		q = tx.Rebind(q)
+		if _, err = tx.Exec(q, args...); err != nil {
 			return err
 		}
 
@@ -3084,6 +3095,8 @@ func (a *adapter) FileStartUpload(fd *t.FileDef) error {
 	var user interface{}
 	if fd.User != "" {
 		user = store.DecodeUid(t.ParseUid(fd.User))
+	} else {
+		user = 0
 	}
 	_, err := a.db.ExecContext(ctx,
 		"INSERT INTO fileuploads(id,createdat,updatedat,userid,status,mimetype,size,location) "+

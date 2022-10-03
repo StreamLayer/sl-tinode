@@ -81,28 +81,34 @@ func (AuthLevel) EnumDescriptor() ([]byte, []int) {
 type InfoNote int32
 
 const (
-	InfoNote_READ     InfoNote = 0
-	InfoNote_RECV     InfoNote = 1
-	InfoNote_KP       InfoNote = 2
-	InfoNote_BYPASS   InfoNote = 3
-	InfoNote_REACTION InfoNote = 4
+	InfoNote_X1       InfoNote = 0
+	InfoNote_READ     InfoNote = 1
+	InfoNote_RECV     InfoNote = 2
+	InfoNote_KP       InfoNote = 3
+	InfoNote_CALL     InfoNote = 4
+	InfoNote_BYPASS   InfoNote = 5
+	InfoNote_REACTION InfoNote = 6
 )
 
 // Enum value maps for InfoNote.
 var (
 	InfoNote_name = map[int32]string{
-		0: "READ",
-		1: "RECV",
-		2: "KP",
-		3: "BYPASS",
-		4: "REACTION",
+		0: "X1",
+		1: "READ",
+		2: "RECV",
+		3: "KP",
+		4: "CALL",
+		5: "BYPASS",
+		6: "REACTION",
 	}
 	InfoNote_value = map[string]int32{
-		"READ":     0,
-		"RECV":     1,
-		"KP":       2,
-		"BYPASS":   3,
-		"REACTION": 4,
+		"X1":       0,
+		"READ":     1,
+		"RECV":     2,
+		"KP":       3,
+		"CALL":     4,
+		"BYPASS":   5,
+		"REACTION": 6,
 	}
 )
 
@@ -1813,6 +1819,12 @@ type ClientNote struct {
 	// Server-issued message ID being reported
 	SeqId   int32  `protobuf:"varint,3,opt,name=seq_id,json=seqId,proto3" json:"seq_id,omitempty"`
 	Content []byte `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	// Client's count of unread messages to report back to the server. Used in push notifications on iOS.
+	Unread int32 `protobuf:"varint,4,opt,name=unread,proto3" json:"unread,omitempty"`
+	// Call event.
+	Event CallEvent `protobuf:"varint,5,opt,name=event,proto3,enum=pbx.CallEvent" json:"event,omitempty"`
+	// Arbitrary json payload (used in video calls).
+	Payload []byte `protobuf:"bytes,6,opt,name=payload,proto3" json:"payload,omitempty"`
 }
 
 func (x *ClientNote) Reset() {
@@ -1871,6 +1883,27 @@ func (x *ClientNote) GetSeqId() int32 {
 func (x *ClientNote) GetContent() []byte {
 	if x != nil {
 		return x.Content
+	}
+	return nil
+}
+
+func (x *ClientNote) GetUnread() int32 {
+	if x != nil {
+		return x.Unread
+	}
+	return 0
+}
+
+func (x *ClientNote) GetEvent() CallEvent {
+	if x != nil {
+		return x.Event
+	}
+	return CallEvent_X2
+}
+
+func (x *ClientNote) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
 	}
 	return nil
 }
@@ -3021,12 +3054,14 @@ type ServerInfo struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Topic      string   `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
-	FromUserId string   `protobuf:"bytes,2,opt,name=from_user_id,json=fromUserId,proto3" json:"from_user_id,omitempty"`
-	What       InfoNote `protobuf:"varint,3,opt,name=what,proto3,enum=pbx.InfoNote" json:"what,omitempty"`
-	SeqId      int32    `protobuf:"varint,4,opt,name=seq_id,json=seqId,proto3" json:"seq_id,omitempty"`
-	Src        string   `protobuf:"bytes,5,opt,name=src,proto3" json:"src,omitempty"`
-	Content    []byte   `protobuf:"bytes,6,opt,name=content,proto3" json:"content,omitempty"`
+	Topic      string    `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
+	FromUserId string    `protobuf:"bytes,2,opt,name=from_user_id,json=fromUserId,proto3" json:"from_user_id,omitempty"`
+	What       InfoNote  `protobuf:"varint,3,opt,name=what,proto3,enum=pbx.InfoNote" json:"what,omitempty"`
+	SeqId      int32     `protobuf:"varint,4,opt,name=seq_id,json=seqId,proto3" json:"seq_id,omitempty"`
+	Src        string    `protobuf:"bytes,5,opt,name=src,proto3" json:"src,omitempty"`
+	Content    []byte    `protobuf:"bytes,6,opt,name=content,proto3" json:"content,omitempty"`
+	Event      CallEvent `protobuf:"varint,6,opt,name=event,proto3,enum=pbx.CallEvent" json:"event,omitempty"`
+	Payload    []byte    `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`
 }
 
 func (x *ServerInfo) Reset() {
@@ -3099,6 +3134,20 @@ func (x *ServerInfo) GetSrc() string {
 func (x *ServerInfo) GetContent() []byte {
 	if x != nil {
 		return x.Content
+	}
+	return nil
+}
+
+func (x *ServerInfo) GetEvent() CallEvent {
+	if x != nil {
+		return x.Event
+	}
+	return CallEvent_X2
+}
+
+func (x *ServerInfo) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
 	}
 	return nil
 }
