@@ -107,7 +107,7 @@ func (t *Topic) preparePushForSubReceipt(fromUid types.Uid, now time.Time, organ
 		},
 	}
 	return receipt
-}
+}..
 
 // Prepares payload to be delivered to a mobile device as a push notification in response to a new subscription in a p2p topic.
 func (t *Topic) pushForP2PSub(fromUid, toUid types.Uid, want, given types.AccessMode, now time.Time, organizationId string) *push.Receipt {
