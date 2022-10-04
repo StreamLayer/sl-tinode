@@ -11,7 +11,7 @@
 
 FROM alpine:3.14
 
-ARG VERSION=0.18
+ARG VERSION=0.19
 ENV VERSION=$VERSION
 ARG BINVERS=$VERSION
 
@@ -101,6 +101,10 @@ ENV TNPG_AUTH_TOKEN=
 
 # Tinode Push Gateway organization name as registered at console.tinode.co
 ENV TNPG_ORG=
+
+# Video calls configuration.
+ENV WEBRTC_ENABLED=false
+ENV ICE_SERVERS_FILE=
 
 # Use the target db by default.
 # When TARGET_DB is "alldbs", it is the user's responsibility

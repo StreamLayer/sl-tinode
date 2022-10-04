@@ -59,7 +59,11 @@ func listenAndServe(addr string, mux *http.ServeMux, tlfConf *tls.Config, stop <
 						globals.tlsRedirectHTTP, addr)
 
 					// This is a second HTTP server listenning on a different port.
-					go http.ListenAndServe(globals.tlsRedirectHTTP, tlsRedirect(addr))
+					go func() {
+						if err := http.ListenAndServe(globals.tlsRedirectHTTP, tlsRedirect(addr)); err != nil && err != http.ErrServerClosed {
+							logs.Info.Println("HTTP redirect failed:", err)
+						}
+					}()
 				}
 			}
 
@@ -343,6 +347,7 @@ func authHttpRequest(req *http.Request) (types.Uid, []byte, error) {
 		decodedSecret := make([]byte, base64.StdEncoding.DecodedLen(len(secret)))
 		n, err := base64.StdEncoding.Decode(decodedSecret, []byte(secret))
 		if err != nil {
+			logs.Info.Println("media: invalid auth secret", authMethod, "'"+secret+"'")
 			return uid, nil, types.ErrMalformed
 		}
 
@@ -356,7 +361,7 @@ func authHttpRequest(req *http.Request) (types.Uid, []byte, error) {
 			}
 			uid = rec.Uid
 		} else {
-			logs.Info.Println("fileUpload: auth data is present but handler is not found", authMethod)
+			logs.Info.Println("media: unknown auth method", authMethod)
 		}
 	} else {
 		// Find the session, make sure it's appropriately authenticated.

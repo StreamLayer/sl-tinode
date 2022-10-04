@@ -236,11 +236,13 @@ message ClientDel {
 	// What to delete, either "msg" to delete messages (default) or "topic" to delete the topic or "sub"
 	// to delete a subscription to topic.
 	enum What {
-		MSG = 0;
-		TOPIC = 1;
-		SUB = 2;
-		USER = 3;
-		CRED = 4;
+		// Invalid value. The name must be globally unique.
+		X0 = 0;
+		MSG = 1;
+		TOPIC = 2;
+		SUB = 3;
+		USER = 4;
+		CRED = 5;
 	}
 	What what = 3;
 	// Delete messages by id or range of ids
@@ -254,21 +256,43 @@ message ClientDel {
 }
 
 enum InfoNote {
-	READ = 0;
-	RECV = 1;
-	KP = 2;
-	BYPASS = 3;
-	REACTION = 4;
+	// Invalid value. The name must be globally unique.
+	X1 = 0;
+	READ = 1;
+	RECV = 2;
+	KP = 3;
+	CALL = 4;
+	BYPASS = 5;
+	REACTION = 6;
+}
+
+enum CallEvent {
+	// Invalid value. The name must be globally unique.
+	X2 = 0;
+	ACCEPT = 1;
+	ANSWER = 2;
+	HANG_UP = 3;
+	ICE_CANDIDATE = 4;
+	INVITE = 5;
+	OFFER = 6;
+	RINGING = 7;
 }
 
 // ClientNote is a client-generated notification for topic subscribers
 message ClientNote {
 	string topic = 1;
-	// what is being reported: "recv" - message received, "read" - message read, "kp" - typing notification, "bypass" - bypass msg to subs
+	// what is being reported: "recv" - message received, "read" - message read,
+	// "kp" - typing notification, "call" - voice/video call, "bypass" - bypass msg to subs
 	InfoNote what = 2;
 	// Server-issued message ID being reported
 	int32 seq_id = 3;
 	bytes content = 4;
+	// Client's count of unread messages to report back to the server. Used in push notifications on iOS.
+	int32 unread = 5;
+	// Call event.
+	CallEvent event = 6;
+	// Arbitrary json payload (used in video calls).
+	bytes payload = 7;
 }
 
 message ClientExtra {
@@ -401,8 +425,10 @@ message ServerPres {
 	string topic = 1;
 	string src = 2;
 	enum What {
-		ON = 0;
-		OFF = 1;
+		// Invalid value. The name must be globally unique.
+		X3 = 0;
+		ON = 1;
+		OFF = 2;
 		UA = 3;
 		UPD = 4;
 		GONE = 5;
@@ -444,6 +470,8 @@ message ServerInfo {
 	int32 seq_id = 4;
 	string src = 5;
 	bytes content = 6;
+	CallEvent event = 7;
+	bytes payload = 8;
 }
 
 // Cumulative message
