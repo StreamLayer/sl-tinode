@@ -1,3 +1,4 @@
+/.idea
 ./docker/tinode/releases/*
 *.gz
 node_modules

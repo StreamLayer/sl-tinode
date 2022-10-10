@@ -924,6 +924,8 @@ func pbTopicSerializeToDesc(topic *Topic) *pbx.TopicDesc {
 		DelId:   int32(topic.delID),
 		Public:  interfaceToBytes(topic.public),
 		Trusted: interfaceToBytes(topic.trusted),
+		// owner user id; custom field
+		Owner: topic.owner.String(),
 	}
 }
 
