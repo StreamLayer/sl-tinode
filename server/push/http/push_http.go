@@ -106,8 +106,14 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	* Sender user data
 	 */
 	sender, _ := store.Users.Get(t.ParseUserId(msg.Payload.From))
-	log.Println("notification topic id: ", msg.Payload.Topic)
-	topic, _ := store.Topics.Get(msg.Payload.Topic)
+	topicId := msg.Payload.Topic
+
+	if t.IsChannel(msg.Payload.Topic) {
+		topicId = t.ChnToGrp(msg.Payload.Topic)
+	}
+
+	log.Println("notification topic id: ", topicId)
+	topic, _ := store.Topics.Get(topicId)
 	log.Println("notification topic: ", topic)
 
 	/*

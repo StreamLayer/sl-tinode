@@ -17,6 +17,7 @@ import (
 	"github.com/tinode/chat/server/push"
 	rh "github.com/tinode/chat/server/ringhash"
 	"github.com/tinode/chat/server/store/types"
+	b "go.mongodb.org/mongo-driver/bson"
 )
 
 const (
@@ -970,6 +971,7 @@ func clusterInit(configString json.RawMessage, self *string) int {
 	gob.Register(map[string]int{})
 	gob.Register(map[string]string{})
 	gob.Register(MsgAccessMode{})
+	gob.Register(b.D{})
 
 	if config.NumProxyEventGoRoutines != 0 {
 		logs.Warn.Println("Cluster config: field num_proxy_event_goroutines is deprecated.")
