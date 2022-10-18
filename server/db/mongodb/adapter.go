@@ -1452,6 +1452,7 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 			if tcat == t.TopicCatGrp {
 				// Maybe convert channel name to topic name.
 				tname = t.ChnToGrp(tname)
+				sub.SetPublic(unmarshalBsonD(sub.GetPublic()))
 			}
 			topq = append(topq, tname)
 		}
