@@ -198,14 +198,16 @@ func sendPush(rcpt *push.Receipt) {
 	// Sort users into local and remote.
 	if globals.cluster != nil {
 		local = &UserCacheReq{PushRcpt: &push.Receipt{
-			Payload: rcpt.Payload,
-			Channel: rcpt.Channel,
-			To:      make(map[types.Uid]push.Recipient),
+			Payload:        rcpt.Payload,
+			Channel:        rcpt.Channel,
+			OrganizationId: rcpt.OrganizationId,
+			To:             make(map[types.Uid]push.Recipient),
 		}}
 		remote := &UserCacheReq{PushRcpt: &push.Receipt{
-			Payload: rcpt.Payload,
-			Channel: rcpt.Channel,
-			To:      make(map[types.Uid]push.Recipient),
+			Payload:        rcpt.Payload,
+			Channel:        rcpt.Channel,
+			OrganizationId: rcpt.OrganizationId,
+			To:             make(map[types.Uid]push.Recipient),
 		}}
 
 		for uid, recipient := range rcpt.To {
