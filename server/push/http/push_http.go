@@ -104,12 +104,12 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 
 	log.Println("Push Message", string(msgM))
 
-	recipientsIds := make([]t.Uid, len(msg.To))
-
 	if len(msg.To) == 0 {
 		log.Println("message skipped")
 		return
 	}
+
+	recipientsIds := make([]t.Uid, len(msg.To))
 
 	for recipientId := range msg.To {
 		recipientsIds = append(recipientsIds, recipientId)
