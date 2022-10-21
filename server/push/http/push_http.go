@@ -94,10 +94,23 @@ func messagePayload(payload *push.Payload) map[string]string {
 func sendPushToHttp(msg *push.Receipt, url string) {
 	log.Println("Prepare to sent HTTP push from: ", msg.Payload.From)
 	log.Println("organization: ", msg.OrganizationId)
-	msgM, _ := json.Marshal(msg)
+	msgM, errM := json.Marshal(msg)
+
+	if errM != nil {
+		log.Println(errM, "http-push-error")
+
+		return
+	}
+
 	log.Println("Push Message", string(msgM))
 
+	if len(msg.To) == 0 {
+		log.Println("message skipped")
+		return
+	}
+
 	recipientsIds := make([]t.Uid, len(msg.To))
+
 	for recipientId := range msg.To {
 		recipientsIds = append(recipientsIds, recipientId)
 	}
@@ -105,7 +118,14 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	/*
 	* Sender user data
 	 */
-	sender, _ := store.Users.Get(t.ParseUserId(msg.Payload.From))
+	sender, senderErr := store.Users.Get(t.ParseUserId(msg.Payload.From))
+
+	if senderErr != nil {
+		log.Println(senderErr, "http-push-error")
+
+		return
+	}
+
 	topicId := msg.Payload.Topic
 
 	if t.IsChannel(msg.Payload.Topic) {
@@ -113,7 +133,14 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	}
 
 	log.Println("notification topic id: ", topicId)
-	topic, _ := store.Topics.Get(topicId)
+	topic, topicErr := store.Topics.Get(topicId)
+
+	if topicErr != nil {
+		log.Println(topicErr, "http-push-error")
+
+		return
+	}
+
 	log.Println("notification topic: ", topic)
 
 	/*
@@ -147,7 +174,13 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	data["payload"] = messagePayload(&msg.Payload)
 	data["head"] = msg.Payload.Head
 	data["what"] = msg.Payload.What
-	requestData, _ := json.Marshal(data)
+	requestData, requestDataErr := json.Marshal(data)
+
+	if requestDataErr != nil {
+		log.Println(requestDataErr, "http-push-error")
+
+		return
+	}
 
 	/*
 	* Send push through http
@@ -155,8 +188,9 @@ func sendPushToHttp(msg *push.Receipt, url string) {
 	log.Println("Sent HTTP push from: ", sender.Id, "to: ", recipientsIds)
 	log.Printf("Push payload: %v", data)
 	_, err := http.Post(url, "application/json", bytes.NewBuffer(requestData))
+
 	if err != nil {
-		log.Println("Http send push failed: ", err)
+		log.Println(err, "http-push-error")
 	}
 }
 
