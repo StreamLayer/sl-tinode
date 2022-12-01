@@ -197,6 +197,15 @@ type pluginRPCFilterConfig struct {
 	Find bool
 }
 
+type pluginConfigRetries struct {
+	Enabled       bool    `json:"enabled"`
+	BackoffFactor float32 `json:"backoff_factor"`
+	MaxAttempts   uint32  `json:"max_attempts"`
+	InitTime      int64   `json:"init_time"`
+	MinTime       int64   `json:"min_time"`
+	MaxTime       int64   `json:"max_time"`
+}
+
 type pluginConfig struct {
 	Enabled bool `json:"enabled"`
 	// Unique service name
@@ -210,7 +219,8 @@ type pluginConfig struct {
 	// HTTP Error message to go with the code
 	FailureMessage string `json:"failure_text"`
 	// Address of plugin server of the form "tcp://localhost:123" or "unix://path_to_socket_file"
-	ServiceAddr string `json:"service_addr"`
+	ServiceAddr string              `json:"service_addr"`
+	Retries     pluginConfigRetries `json:"retries"`
 }
 
 // Plugin defines client-side parameters of a gRPC plugin.
@@ -231,6 +241,7 @@ type Plugin struct {
 
 	conn   *grpc.ClientConn
 	client pbx.PluginClient
+	config *pluginConfig
 }
 
 func pluginsInit(configString json.RawMessage) {
@@ -262,6 +273,7 @@ func pluginsInit(configString json.RawMessage) {
 			timeout:     time.Duration(conf.Timeout) * time.Microsecond,
 			failureCode: conf.FailureCode,
 			failureText: conf.FailureMessage,
+			config:      conf,
 		}
 		var err error
 		if globals.plugins[count].filterFireHose, err =
@@ -511,6 +523,53 @@ func pluginAccount(user *types.User, action int) {
 	}
 }
 
+func sendTopicEventToPlugin(parentCtx *context.Context, plugin *Plugin, topicEvent *pbx.TopicEvent) (*pbx.Unused, error) {
+	var ctx context.Context
+	var cancel context.CancelFunc
+
+	if plugin.timeout > 0 {
+		ctx, cancel = context.WithTimeout(*parentCtx, plugin.timeout)
+		defer cancel()
+	} else {
+		ctx = *parentCtx
+	}
+
+	return plugin.client.Topic(ctx, topicEvent)
+}
+
+func sendTopicEventToPluginWithRetries(plugin *Plugin, topicEvent *pbx.TopicEvent) (*pbx.Unused, error) {
+	var unused *pbx.Unused
+	var err error
+
+	retriesOptions := plugin.config.Retries
+
+	ctx := context.Background()
+	delay := retriesOptions.InitTime
+	timeDelay := time.Duration(delay) * time.Microsecond
+
+	for attempt := uint32(1); attempt < retriesOptions.MaxAttempts; attempt++ {
+		time.Sleep(timeDelay)
+
+		unused, err = sendTopicEventToPlugin(&ctx, plugin, topicEvent)
+
+		if err == nil {
+			return unused, err
+		}
+
+		if delay > retriesOptions.MinTime && delay < retriesOptions.MaxTime {
+			delay = int64(float32(delay) * retriesOptions.BackoffFactor)
+			if delay > retriesOptions.MaxTime {
+				delay = retriesOptions.MaxTime
+			} else if delay < retriesOptions.MinTime {
+				delay = retriesOptions.MinTime
+			}
+			timeDelay = time.Duration(delay) * time.Microsecond
+		}
+	}
+
+	return unused, err
+}
+
 func pluginTopic(topic *Topic, action int) {
 	if globals.plugins == nil {
 		return
@@ -541,9 +600,62 @@ func pluginTopic(topic *Topic, action int) {
 			ctx = context.Background()
 		}
 		if _, err := p.client.Topic(ctx, event); err != nil {
-			logs.Warn.Println("plugins: Topic call failed", p.name, err)
+			if p.config.Retries.Enabled {
+				if _, err = sendTopicEventToPluginWithRetries(p, event); err != nil {
+					logs.Warn.Println("plugins: Topic call failed after retries", p.name, err)
+				}
+			} else {
+				logs.Warn.Println("plugins: Topic call failed", p.name, err)
+			}
 		}
 	}
+}
+
+func sendSubscriptionEventToPlugin(parentCtx *context.Context, plugin *Plugin, subscriptionEvent *pbx.SubscriptionEvent) (*pbx.Unused, error) {
+	var ctx context.Context
+	var cancel context.CancelFunc
+
+	if plugin.timeout > 0 {
+		ctx, cancel = context.WithTimeout(*parentCtx, plugin.timeout)
+		defer cancel()
+	} else {
+		ctx = *parentCtx
+	}
+
+	return plugin.client.Subscription(ctx, subscriptionEvent)
+}
+
+func sendSubscriptionEventToPluginWithRetries(plugin *Plugin, subscriptionEvent *pbx.SubscriptionEvent) (*pbx.Unused, error) {
+	var unused *pbx.Unused
+	var err error
+
+	retriesOptions := plugin.config.Retries
+
+	ctx := context.Background()
+	delay := retriesOptions.InitTime
+	timeDelay := time.Duration(delay) * time.Microsecond
+
+	for attempt := uint32(1); attempt < retriesOptions.MaxAttempts; attempt++ {
+		time.Sleep(timeDelay)
+
+		unused, err = sendSubscriptionEventToPlugin(&ctx, plugin, subscriptionEvent)
+
+		if err == nil {
+			return unused, err
+		}
+
+		if delay > retriesOptions.MinTime && delay < retriesOptions.MaxTime {
+			delay = int64(float32(delay) * retriesOptions.BackoffFactor)
+			if delay > retriesOptions.MaxTime {
+				delay = retriesOptions.MaxTime
+			} else if delay < retriesOptions.MinTime {
+				delay = retriesOptions.MinTime
+			}
+			timeDelay = time.Duration(delay) * time.Microsecond
+		}
+	}
+
+	return unused, err
 }
 
 func pluginSubscription(sub *types.Subscription, action int) {
@@ -587,7 +699,13 @@ func pluginSubscription(sub *types.Subscription, action int) {
 			ctx = context.Background()
 		}
 		if _, err := p.client.Subscription(ctx, event); err != nil {
-			logs.Warn.Println("plugins: Subscription call failed", p.name, err)
+			if p.config.Retries.Enabled {
+				if _, err = sendSubscriptionEventToPluginWithRetries(p, event); err != nil {
+					logs.Warn.Println("plugins: Subscription call failed after retries", p.name, err)
+				}
+			} else {
+				logs.Warn.Println("plugins: Subscription call failed", p.name, err)
+			}
 		}
 	}
 }
