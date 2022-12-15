@@ -11,6 +11,7 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -140,6 +141,10 @@ func (sess *Session) writeGrpcLoop() {
 
 func grpcWrite(sess *Session, msg interface{}) error {
 	if out := sess.grpcnode; out != nil {
+
+		str := fmt.Sprintf("%v", msg)
+		logs.Info.Println("grpcWrite", sess.sid, str)
+
 		// Will panic if msg is not of *pbx.ServerMsg type. This is an intentional panic.
 		return out.Send(msg.(*pbx.ServerMsg))
 	}
