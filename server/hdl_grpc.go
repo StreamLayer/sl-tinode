@@ -11,6 +11,7 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -139,16 +140,16 @@ func (sess *Session) writeGrpcLoop() {
 }
 
 func grpcWrite(sess *Session, msg interface{}) error {
-	// After this flag's been flipped to true, there must not be any more writes
-	// into the session's send channel.
-	// 0 = false
-	// 1 = true
-	if sess.terminating == 1 {
-		logs.Info.Println("warning: grpcWrite. session is terminated", sess.sid)
-		return nil
-	}
-
 	if out := sess.grpcnode; out != nil {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Println("panic occurred:", err)
+				str := fmt.Sprintf("%v", msg)
+				logs.Info.Println("grpcWrite", sess.sid, str)
+				fmt.Printf("Session: %+v\n", sess)
+			}
+		}()
+
 		// Will panic if msg is not of *pbx.ServerMsg type. This is an intentional panic.
 		return out.Send(msg.(*pbx.ServerMsg))
 	}
