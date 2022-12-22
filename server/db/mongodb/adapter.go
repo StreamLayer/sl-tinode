@@ -1453,7 +1453,7 @@ func (a *adapter) TopicsForUser(uid t.Uid, keepDeleted bool, opts *t.QueryOpt) (
 				// Maybe convert channel name to topic name.
 				tname = t.ChnToGrp(tname)
 
-				if pub = sub.GetPublic(); pub != nil {
+				if pub := sub.GetPublic(); pub != nil {
 					sub.SetPublic(unmarshalBsonD(pub))
 				}
 			}
