@@ -141,6 +141,7 @@ func (sess *Session) writeGrpcLoop() {
 
 func grpcWrite(sess *Session, msg interface{}) error {
 	if out := sess.grpcnode; out != nil {
+		// handle panic runtime error: invalid memory address or nil pointer dereference
 		defer func() {
 			if err := recover(); err != nil {
 				log.Println("panic occurred:", err)
