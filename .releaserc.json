@@ -1,8 +1,7 @@
 {
   "branches": [
     { "name": "master" },
-    { "name": "staging", "prerelease": "rc" },
-    { "name": "fix/nil-pointer-dereference", "prerelease": "dev"}
+    { "name": "staging", "prerelease": "rc" }
   ],
   "plugins": [
     ["@semantic-release/commit-analyzer", {
