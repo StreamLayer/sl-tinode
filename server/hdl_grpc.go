@@ -11,6 +11,7 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -140,6 +141,16 @@ func (sess *Session) writeGrpcLoop() {
 
 func grpcWrite(sess *Session, msg interface{}) error {
 	if out := sess.grpcnode; out != nil {
+		// handle panic runtime error: invalid memory address or nil pointer dereference
+		defer func() {
+			if err := recover(); err != nil {
+				log.Println("panic occurred:", err)
+				str := fmt.Sprintf("%v", msg)
+				logs.Info.Println("grpcWrite", sess.sid, str)
+				fmt.Printf("Session: %+v\n", sess)
+			}
+		}()
+
 		// Will panic if msg is not of *pbx.ServerMsg type. This is an intentional panic.
 		return out.Send(msg.(*pbx.ServerMsg))
 	}
