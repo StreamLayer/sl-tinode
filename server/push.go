@@ -41,6 +41,7 @@ func (t *Topic) pushForData(fromUid types.Uid, data *MsgServerData, organization
 			From:        data.From,
 			Timestamp:   data.Timestamp,
 			SeqId:       data.SeqId,
+			Head:        data.Head, // head for push notification service
 			ContentType: contentType,
 			Content:     data.Content,
 		},
