@@ -2653,12 +2653,16 @@ func normalizeUpdateMap(update map[string]interface{}) map[string]interface{} {
 // Mongo drivers unmarshalling into interface{} creates bson.D object for maps and bson.A object for slices.
 // We need manually unmarshal them into correct types: map[string]interface{} and []interface{] respectively.
 func unmarshalBsonD(bsonObj interface{}) interface{} {
-	if obj, ok := bsonObj.(b.D); ok && len(obj) != 0 {
-		result := make(map[string]interface{})
-		for key, val := range obj.Map() {
-			result[key] = unmarshalBsonD(val)
+	if obj, ok := bsonObj.(b.D); ok {
+		if len(obj) != 0 {
+			result := make(map[string]interface{})
+			for key, val := range obj.Map() {
+				result[key] = unmarshalBsonD(val)
+			}
+			return result
 		}
-		return result
+
+		return nil
 	} else if obj, ok := bsonObj.(primitive.Binary); ok {
 		// primitive.Binary is a struct type with Subtype and Data fields. We need only Data ([]byte)
 		return obj.Data
