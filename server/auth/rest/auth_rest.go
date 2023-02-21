@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -33,8 +32,6 @@ type authenticator struct {
 	rTagNS []string
 	// Optional regex pattern for checking tokens.
 	reToken *regexp.Regexp
-
-	sdkKey string
 }
 
 // Request to the server.
@@ -120,34 +117,15 @@ func (a *authenticator) Init(jsonconf json.RawMessage, name string) error {
 	return nil
 }
 
-// Setup sdk key
-func (a *authenticator) SaveSdkKey(sdkKey string) error {
-	log.Println("save sdk key", sdkKey)
-
-	if a.name == "" {
-		return errors.New("auth_rest: not initialized")
-	}
-
-	a.sdkKey = sdkKey
-
-	return nil
-}
-
-// Seup sdk key
-func (a *authenticator) ResetSdkKey() error {
-	a.sdkKey = ""
-	return nil
-}
-
 // IsInitialized returns true if the handler is initialized.
 func (a *authenticator) IsInitialized() bool {
 	return a.name != ""
 }
 
 // Execute HTTP POST to the server at the specified endpoint and with the provided payload.
-func (a *authenticator) callEndpoint(endpoint string, rec *auth.Rec, secret []byte, remoteAddr string) (*response, error) {
+func (a *authenticator) callEndpoint(endpoint string, rec *auth.Rec, secret []byte, remoteAddr string, sdkKey string) (*response, error) {
 	// Convert payload to json.
-	req := &request{Endpoint: endpoint, Name: a.name, Record: rec, Secret: secret, RemoteAddr: remoteAddr, SdkKey: a.sdkKey}
+	req := &request{Endpoint: endpoint, Name: a.name, Record: rec, Secret: secret, RemoteAddr: remoteAddr, SdkKey: sdkKey}
 	content, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -195,7 +173,7 @@ func (a *authenticator) callEndpoint(endpoint string, rec *auth.Rec, secret []by
 // AddRecord adds persistent authentication record to the database.
 // Returns: updated auth record, error
 func (a *authenticator) AddRecord(rec *auth.Rec, secret []byte, remoteAddr string) (*auth.Rec, error) {
-	resp, err := a.callEndpoint("add", rec, secret, remoteAddr)
+	resp, err := a.callEndpoint("add", rec, secret, remoteAddr, "")
 	if err != nil {
 		return nil, err
 	}
@@ -205,14 +183,13 @@ func (a *authenticator) AddRecord(rec *auth.Rec, secret []byte, remoteAddr strin
 
 // UpdateRecord updates existing record with new credentials.
 func (a *authenticator) UpdateRecord(rec *auth.Rec, secret []byte, remoteAddr string) (*auth.Rec, error) {
-	_, err := a.callEndpoint("upd", rec, secret, remoteAddr)
+	_, err := a.callEndpoint("upd", rec, secret, remoteAddr, "")
 	return rec, err
 }
 
 // Authenticate: get user record by provided secret
 func (a *authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey string) (*auth.Rec, []byte, error) {
-	a.SaveSdkKey(sdkKey)
-	resp, err := a.callEndpoint("auth", nil, secret, remoteAddr)
+	resp, err := a.callEndpoint("auth", nil, secret, remoteAddr, sdkKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -246,14 +223,13 @@ func (a *authenticator) Authenticate(secret []byte, remoteAddr string, sdkKey st
 
 		// Report the new UID to the server.
 		resp.Record.Uid = user.Uid()
-		_, err = a.callEndpoint("link", resp.Record, secret, "")
+		_, err = a.callEndpoint("link", resp.Record, secret, "", sdkKey)
 		if err != nil {
 			store.Users.Delete(resp.Record.Uid, true)
 			return nil, nil, err
 		}
 	}
 
-	a.ResetSdkKey()
 	return resp.Record, resp.ByteVal, nil
 }
 
@@ -273,7 +249,7 @@ func (a *authenticator) AsTag(token string) string {
 // IsUnique verifies if the provided secret can be considered unique by the auth scheme
 // E.g. if login is unique.
 func (a *authenticator) IsUnique(secret []byte, remoteAddr string) (bool, error) {
-	resp, err := a.callEndpoint("checkunique", nil, secret, remoteAddr)
+	resp, err := a.callEndpoint("checkunique", nil, secret, remoteAddr, "")
 	if err != nil {
 		return false, err
 	}
@@ -283,7 +259,7 @@ func (a *authenticator) IsUnique(secret []byte, remoteAddr string) (bool, error)
 
 // GenSecret generates a new secret, if appropriate.
 func (a *authenticator) GenSecret(rec *auth.Rec) ([]byte, time.Time, error) {
-	resp, err := a.callEndpoint("gen", rec, nil, "")
+	resp, err := a.callEndpoint("gen", rec, nil, "", "")
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -294,7 +270,7 @@ func (a *authenticator) GenSecret(rec *auth.Rec) ([]byte, time.Time, error) {
 // DelRecords deletes all authentication records for the given user.
 func (a *authenticator) DelRecords(uid types.Uid) error {
 	logs.Info.Println("DelRecords, initialized=", a.name != "")
-	_, err := a.callEndpoint("del", &auth.Rec{Uid: uid}, nil, "")
+	_, err := a.callEndpoint("del", &auth.Rec{Uid: uid}, nil, "", "")
 	return err
 }
 
@@ -309,7 +285,7 @@ func (a *authenticator) RestrictedTags() ([]string, error) {
 	}
 
 	// First time use, fetch prefixes from the server.
-	resp, err := a.callEndpoint("rtagns", nil, nil, "")
+	resp, err := a.callEndpoint("rtagns", nil, nil, "", "")
 	if err != nil {
 		return nil, err
 	}
