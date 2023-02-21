@@ -1234,7 +1234,14 @@ func (a *adapter) AuthDelScheme(uid t.Uid, scheme string) error {
 
 func (a *adapter) authDelAllRecords(ctx context.Context, uid t.Uid) (int, error) {
 	res, err := a.db.Collection("auth").DeleteMany(ctx, b.M{"userid": uid.String()})
-	return int(res.DeletedCount), err
+	if err != nil {
+		return 0, err
+	}
+
+	if res != nil {
+		return int(res.DeletedCount), err
+	}
+	return 0, nil
 }
 
 // AuthDelAllRecords deletes all records of a given user.
