@@ -54,7 +54,7 @@ func delrangeDeserialize(in []types.Range) []MsgDelRange {
 // Trim whitespace, remove short/empty tags and duplicates, convert to lowercase, ensure
 // the number of tags does not exceed the maximum.
 func normalizeTags(src []string) types.StringSlice {
-	if len(src) == 0 {
+	if src == nil {
 		return nil
 	}
 
@@ -104,17 +104,19 @@ func normalizeTags(src []string) types.StringSlice {
 }
 
 // stringDelta extracts the slices of added and removed strings from two slices:
-//   added :=  newSlice - (oldSlice & newSlice) -- present in new but missing in old
-//   removed := oldSlice - (oldSlice & newSlice) -- present in old but missing in new
-func stringSliceDelta(rold, rnew []string) (added, removed []string) {
+//
+//	added :=  newSlice - (oldSlice & newSlice) -- present in new but missing in old
+//	removed := oldSlice - (oldSlice & newSlice) -- present in old but missing in new
+//	intersection := oldSlice & newSlice -- present in both old and new
+func stringSliceDelta(rold, rnew []string) (added, removed, intersection []string) {
 	if len(rold) == 0 && len(rnew) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if len(rold) == 0 {
-		return rnew, nil
+		return rnew, nil, nil
 	}
 	if len(rnew) == 0 {
-		return nil, rold
+		return nil, rold, nil
 	}
 
 	sort.Strings(rold)
@@ -136,6 +138,7 @@ func stringSliceDelta(rold, rnew []string) (added, removed []string) {
 
 		} else {
 			// present in both
+			intersection = append(intersection, rold[o])
 			if o < lold {
 				o++
 			}
@@ -144,7 +147,7 @@ func stringSliceDelta(rold, rnew []string) (added, removed []string) {
 			}
 		}
 	}
-	return added, removed
+	return added, removed, intersection
 }
 
 // restrictedTagsEqual checks if two sets of tags contain the same set of restricted tags:
@@ -358,7 +361,9 @@ func parseVersionPart(vers string) int {
 }
 
 // Parses semantic version string in the following formats:
-//  1.2, 1.2abc, 1.2.3, 1.2.3-abc, v0.12.34-rc5
+//
+//	1.2, 1.2abc, 1.2.3, 1.2.3-abc, v0.12.34-rc5
+//
 // Unparceable values are replaced with zeros.
 func parseVersion(vers string) int {
 	var major, minor, patch int

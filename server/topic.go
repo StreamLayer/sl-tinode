@@ -1653,24 +1653,22 @@ func (t *Topic) thisUserSub(sess *Session, pkt *ClientComMessage, asUid types.Ui
 		if modeWant != types.ModeUnset {
 			// Explicit modeWant is provided
 
+			// Make sure the current owner cannot unset the owner flag or ban himself.
+			if t.owner == asUid && (!modeWant.IsOwner() || !modeWant.IsJoiner()) {
+				sess.queueOut(ErrPermissionDeniedReply(pkt, now))
+				return nil, errors.New("cannot unset ownership or self-ban the owner")
+			}
+
 			// Perform sanity checks
 			if userData.modeGiven.IsOwner() {
 				// Check for possible ownership transfer. Handle the following cases:
-				// 1. Owner joining the topic without any changes
+				// 1. Acceptance or rejection of the ownership transfer
 				// 2. Owner changing own settings
-				// 3. Acceptance or rejection of the ownership transfer
-
-				// Make sure the current owner cannot unset the owner flag or ban himself
-				if t.owner == asUid && (!modeWant.IsOwner() || !modeWant.IsJoiner()) {
-					sess.queueOut(ErrPermissionDeniedReply(pkt, now))
-					return nil, errors.New("cannot unset ownership or self-ban the owner")
-				}
 
 				// Ownership transfer
 				ownerChange = modeWant.IsOwner() && !userData.modeWant.IsOwner()
 
 				// The owner should be able to grant himself any access permissions.
-				// If ownership transfer is rejected don't upgrade.
 				if modeWant.IsOwner() && !userData.modeGiven.BetterEqual(modeWant) {
 					userData.modeGiven |= modeWant
 				}
@@ -1836,16 +1834,11 @@ func (t *Topic) anotherUserSub(sess *Session, asUid, target types.Uid, asChan bo
 	now := types.TimeNow()
 	set := pkt.Set
 
-	// Access mode values as they were before this request was processed.
-	oldWant := types.ModeUnset
-	oldGiven := types.ModeUnset
-
-	// Access mode of the person who is executing this approval process
-	var hostMode types.AccessMode
-
 	// Check if approver actually has permission to manage sharing
-	userData, ok := t.perUser[asUid]
-	if !ok || !(userData.modeGiven & userData.modeWant).IsSharer() {
+	hostData, ok := t.perUser[asUid]
+	// Access mode of the person who is executing this approval process
+	hostMode := hostData.modeGiven & hostData.modeWant
+	if !ok || !hostMode.IsSharer() {
 		sess.queueOut(ErrPermissionDeniedReply(pkt, now))
 		return nil, errors.New("topic access denied; approver has no permission")
 	}
@@ -1861,8 +1854,6 @@ func (t *Topic) anotherUserSub(sess *Session, asUid, target types.Uid, asChan bo
 		sess.queueOut(ErrPermissionDeniedReply(pkt, now))
 		return nil, errors.New("topic is suspended")
 	}
-
-	hostMode = userData.modeGiven & userData.modeWant
 
 	// Parse the access mode granted
 	modeGiven := types.ModeUnset
@@ -1890,6 +1881,10 @@ func (t *Topic) anotherUserSub(sess *Session, asUid, target types.Uid, asChan bo
 		sess.queueOut(ErrPermissionDeniedReply(pkt, now))
 		return nil, errors.New("attempt to transfer ownership by non-owner")
 	}
+
+	// Access mode values as they were before this request was processed.
+	oldWant := types.ModeUnset
+	oldGiven := types.ModeUnset
 
 	// Check if it's a new invite. If so, save it to database as a subscription.
 	// Saved subscription does not mean the user is allowed to post/read
@@ -1986,14 +1981,21 @@ func (t *Topic) anotherUserSub(sess *Session, asUid, target types.Uid, asChan bo
 			// Request to re-send invite without changing the access mode
 			modeGiven = userData.modeGiven
 		} else if modeGiven != userData.modeGiven {
-			// Changing the previously assigned value
-			userData.modeGiven = modeGiven
+			// Changing the previously assigned value.
+
+			// Cannot strip owner of ownership or ban the owner.
+			if t.owner == target && (!modeGiven.IsOwner() || !modeGiven.IsJoiner()) {
+				sess.queueOut(ErrPermissionDeniedReply(pkt, now))
+				return nil, errors.New("cannot stip ownership or ban the owner")
+			}
 
 			// Save changed value to database
 			if err := store.Subs.Update(t.name, target,
 				map[string]interface{}{"ModeGiven": modeGiven}); err != nil {
 				return nil, err
 			}
+
+			userData.modeGiven = modeGiven
 			t.perUser[target] = userData
 		}
 	}
@@ -2383,6 +2385,30 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 		} else {
 			// User manages cache. Include deleted subscriptions too.
 			subs, err = store.Users.GetTopicsAny(asUid, msgOpts2storeOpts(req))
+
+			// Returned subscriptions do not contain topics which are online now but otherwise unchanged.
+			// We need to add these topic to the list otherwise the user would see them as offline.
+			selected := map[string]struct{}{}
+			for i := range subs {
+				sub := &subs[i]
+				with := sub.GetWith()
+				if with != "" {
+					selected[with] = struct{}{}
+				} else {
+					selected[sub.Topic] = struct{}{}
+				}
+			}
+
+			// Add dummy subscriptions for missing online topics.
+			for topic, psd := range t.perSubs {
+				_, present := selected[topic]
+				if !present && psd.online {
+					sub := types.Subscription{Topic: topic}
+					sub.SetWith(topic)
+					sub.SetDummy(true)
+					subs = append(subs, sub)
+				}
+			}
 		}
 	case types.TopicCatFnd:
 		// Select public or private query. Public has priority.
@@ -2402,7 +2428,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 					if len(req) > 0 || len(opt) > 0 {
 						// Check if the query contains terms that the user is not allowed to use.
 						allReq := types.FlattenDoubleSlice(req)
-						restr, _ := stringSliceDelta(t.tags, filterRestrictedTags(append(allReq, opt...),
+						restr, _, _ := stringSliceDelta(t.tags, filterRestrictedTags(append(allReq, opt...),
 							globals.maskedTagNS))
 
 						if len(restr) > 0 {
@@ -2518,15 +2544,15 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 
 				if !deleted && !banned {
 					if isReader {
-						if sub.GetTouchedAt().IsZero() {
+						touchedAt := sub.GetTouchedAt()
+						if touchedAt.IsZero() {
 							mts.TouchedAt = nil
 						} else {
-							touchedAt := sub.GetTouchedAt()
 							mts.TouchedAt = &touchedAt
 						}
 						mts.SeqId = sub.GetSeqId()
 						mts.DelId = sub.DelId
-					} else {
+					} else if !sub.UpdatedAt.IsZero() {
 						mts.TouchedAt = &sub.UpdatedAt
 					}
 
@@ -2564,7 +2590,9 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 			}
 
 			if !deleted {
-				mts.UpdatedAt = &sub.UpdatedAt
+				if !sub.UpdatedAt.IsZero() {
+					mts.UpdatedAt = &sub.UpdatedAt
+				}
 				if isReader && !banned {
 					mts.ReadSeqId = sub.ReadSeqId
 					mts.RecvSeqId = sub.RecvSeqId
@@ -2572,7 +2600,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 
 				if t.cat != types.TopicCatFnd {
 					// p2p and grp
-					if sharer || uid == asUid || subMode.IsAdmin() {
+					if !sub.IsDummy() && (sharer || uid == asUid || subMode.IsAdmin()) {
 						// If user is not a sharer, the access mode of other ordinary users if not accessible.
 						// Own and admin permissions only are visible to non-sharers.
 						mts.Acs.Mode = subMode.String()
@@ -2788,7 +2816,7 @@ func (t *Topic) replySetTags(sess *Session, asUid types.Uid, msg *ClientComMessa
 			err = errors.New("attempt to mutate restricted tags")
 			resp = ErrPermissionDeniedReply(msg, now)
 		} else {
-			added, removed := stringSliceDelta(t.tags, tags)
+			added, removed, _ := stringSliceDelta(t.tags, tags)
 			if len(added) > 0 || len(removed) > 0 {
 				update := map[string]interface{}{"Tags": tags, "UpdatedAt": now}
 				if t.cat == types.TopicCatMe {
@@ -3086,7 +3114,7 @@ func (t *Topic) replyDelCred(sess *Session, asUid types.Uid, authLvl auth.Level,
 	tags, err := deleteCred(asUid, authLvl, del.Cred)
 	if tags != nil {
 		// Check if anything has been actually removed.
-		_, removed := stringSliceDelta(t.tags, tags)
+		_, removed, _ := stringSliceDelta(t.tags, tags)
 		if len(removed) > 0 {
 			t.tags = tags
 			t.presSubsOnline("tags", "", nilPresParams, nilPresFilters, "")

@@ -112,8 +112,9 @@ var Store PersistentStorageInterface
 type storeObj struct{}
 
 // Open initializes the persistence system. Adapter holds a connection pool for a database instance.
-// 	 name - name of the adapter rquested in the config file
-//   jsonconf - configuration string
+//
+//		name - name of the adapter rquested in the config file
+//	  jsonconf - configuration string
 func (storeObj) Open(workerId int, jsonconf json.RawMessage) error {
 	if err := openAdapter(workerId, jsonconf); err != nil {
 		return err
@@ -277,6 +278,7 @@ type UsersPersistenceInterface interface {
 	GetAllCreds(id types.Uid, method string, validatedOnly bool) ([]types.Credential, error)
 	DelCred(id types.Uid, method, value string) error
 	GetUnreadCount(ids ...types.Uid) (map[types.Uid]int, error)
+	GetUnvalidated(lastUpdatedBefore time.Time, limit int) ([]types.Uid, error)
 }
 
 // usersMapper is a concrete type which implements UsersPersistenceInterface.
@@ -499,6 +501,12 @@ func (usersMapper) DelCred(id types.Uid, method, value string) error {
 // GetUnreadCount returs users' total count of unread messages in all topics with the R permissions.
 func (usersMapper) GetUnreadCount(ids ...types.Uid) (map[types.Uid]int, error) {
 	return adp.UserUnreadCount(ids...)
+}
+
+// GetUnvalidated returns a list of stale user ids which have unvalidated credentials,
+// their auth levels and a comma-separated list of these credential names.
+func (usersMapper) GetUnvalidated(lastUpdatedBefore time.Time, limit int) ([]types.Uid, error) {
+	return adp.UserGetUnvalidated(lastUpdatedBefore, limit)
 }
 
 // TopicsPersistenceInterface is an interface which defines methods for persistent storage of topics.

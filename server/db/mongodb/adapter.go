@@ -953,6 +953,91 @@ func (a *adapter) UserUnreadCount(ids ...t.Uid) (map[t.Uid]int, error) {
 	return counts, nil
 }
 
+// UserGetUnvalidated returns a list of uids which have never logged in, have no
+// validated credentials and haven't been updated since lastUpdatedBefore.
+func (a *adapter) UserGetUnvalidated(lastUpdatedBefore time.Time, limit int) ([]t.Uid, error) {
+	/*
+		Query:
+		[
+			// .. WHERE lastseen IS NULL AND updatedat<?
+			{$match: {
+				$and: [
+					{ lastseen: null },
+					{ updatedat: {$lt: new ISODate("2022-12-09T01:26:15.819Z")} },
+				],
+			}},
+			// JOIN credentials ON id=user
+			{$lookup: {
+				from: "credentials",
+				localField: "_id",
+				foreignField: "user",
+				as: "fcred",
+			}},
+			// {x: 1, y: [{a: 1}, {a: 2}]} -> [{x: 1, a: 1}, {x: 1, a: 2}]
+		  {$unwind: {path: "$fcred"}},
+			// SELECT _id, CASE WHEN done THEN 1 ELSE 0 END
+		  {$project: {
+				_id: 1,
+		    completed: { $cond: { if: "$fcred.done", then: 1, else: 0 } },
+		  }},
+			// GROUP BY _id
+		  {$group: { _id: "$_id", completed: { $sum: "$completed" } } },
+			// HAVING completed=0
+		  {$match: { completed: 0 }},
+			// SELECT _id
+		  {$project: { _id: "$_id" }},
+			{$limit: 10}
+		]
+	*/
+	pipeline := b.A{
+		b.M{"$match": b.M{
+			"$and": b.A{
+				b.M{"lastseen": primitive.Null{}},
+				b.M{"updatedat": b.M{"$lt": lastUpdatedBefore}},
+			},
+		}},
+		b.M{"$lookup": b.D{
+			{"from", "credentials"},
+			{"localField", "_id"},
+			{"foreignField", "user"},
+			{"as", "fcred"}},
+		},
+		b.M{"$unwind": b.M{"path": "$fcred"}},
+		b.M{"$project": b.D{
+			{"_id", 1},
+			{"completed", b.M{
+				"$cond": b.D{{"if", "$fcred.done"}, {"then", 1}, {"else", 0}}},
+			}}},
+		b.M{"$group": b.D{{"_id", "$_id"}, {"completed", b.M{"$sum": "$completed"}}}},
+		b.M{"$match": b.M{"completed": 0}},
+		b.M{"$project": b.M{"_id": "$_id"}},
+		b.M{"$limit": limit},
+	}
+
+	cur, err := a.db.Collection("users").Aggregate(a.ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(a.ctx)
+
+	var uids []t.Uid
+	for cur.Next(a.ctx) {
+		var oneUser struct {
+			Id string `bson:"_id"`
+		}
+		if err := cur.Decode(&oneUser); err != nil {
+			return nil, err
+		}
+		uid := t.ParseUid(oneUser.Id)
+		if uid.IsZero() {
+			return nil, errors.New("failed to decode user id")
+		}
+		uids = append(uids, uid)
+	}
+
+	return uids, err
+}
+
 // Credential management
 
 // CredUpsert adds or updates a validation record. Returns true if inserted, false if updated.

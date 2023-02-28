@@ -848,7 +848,7 @@ func (a *adapter) UserDelete(uid t.Uid, hard bool) error {
 			return err
 		}
 
-		q := rdb.DB(a.dbName).Table("users").Get(uid.String())
+		q := rdb.DB(a.dbName).Table("users").GetAll(uid.String())
 
 		// Unlink user's attachment.
 		if err = a.decFileUseCounter(q); err != nil {
@@ -1071,6 +1071,59 @@ func (a *adapter) UserUnreadCount(ids ...t.Uid) (map[t.Uid]int, error) {
 	err = cursor.Err()
 
 	return counts, err
+}
+
+// UserGetUnvalidated returns a list of uids which have never logged in, have no
+// validated credentials and haven't been updated since lastUpdatedBefore.
+func (a *adapter) UserGetUnvalidated(lastUpdatedBefore time.Time, limit int) ([]t.Uid, error) {
+	/*
+		Query:
+			r.db('tinode').table('users')
+				.filter(r.row('LastSeen').eq(null).and(r.row('UpdatedAt').lt('Mar 31 2022 01:03:38')))
+				.eqJoin('Id', r.db('tinode').table('credentials'), {index: 'User'}).zip()
+				.pluck('User', 'Done')
+				.group('User')
+				.sum(function(row) {return r.branch(row('Done'), 1, 0)})
+				.ungroup()
+				.filter({reduction: 0})
+				.pluck('group').limit(10)
+
+		Result: [{"group": "3W1hPuHjobg"}, {"group": "Fh_skXNRhVg"}, {"group": "NqMZzq0ajWk"}]
+	*/
+	cursor, err := rdb.DB(a.dbName).Table("users").
+		Filter(rdb.Row.Field("LastSeen").Eq(nil).And(rdb.Row.Field("UpdatedAt").Lt(lastUpdatedBefore))).
+		EqJoin("Id", rdb.DB(a.dbName).Table("credentials"), rdb.EqJoinOpts{Index: "User"}).Zip().
+		Pluck("User", "Done").
+		Group("User").
+		Sum(func(row rdb.Term) rdb.Term { return rdb.Branch(row.Field("Done"), 1, 0) }).
+		Ungroup().
+		Filter(rdb.Row.Field("reduction").Eq(0)).
+		Pluck("group").
+		Limit(limit).
+		Run(a.conn)
+
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close()
+
+	var rec struct {
+		Group string
+	}
+
+	var uids []t.Uid
+	for cursor.Next(&rec) {
+		uid := t.ParseUid(rec.Group)
+		if !uid.IsZero() {
+			uids = append(uids, uid)
+		} else {
+			return nil, errors.New("bad uid field")
+		}
+	}
+
+	err = cursor.Err()
+
+	return uids, err
 }
 
 // *****************************
@@ -2213,7 +2266,6 @@ func (a *adapter) DeviceUpsert(uid t.Uid, def *t.DeviceDef) error {
 	user := uid.String()
 
 	// Ensure uniqueness of the device ID
-	var others []interface{}
 	// Find users who already use this device ID, ignore current user.
 	cursor, err := rdb.DB(a.dbName).Table("users").GetAllByIndex("DeviceIds", def.DeviceId).
 		// We only care about user Ids
@@ -2229,6 +2281,7 @@ func (a *adapter) DeviceUpsert(uid t.Uid, def *t.DeviceDef) error {
 	}
 	defer cursor.Close()
 
+	var others []interface{}
 	if err = cursor.All(&others); err != nil {
 		return err
 	}
@@ -2601,7 +2654,8 @@ func (a *adapter) FileLinkAttachments(topic string, userId, msgId t.Uid, fids []
 
 		// Find the old attachment.
 		var cursor *rdb.Cursor
-		cursor, err = rdb.DB(a.dbName).Table(table).Get(linkId).Field("Attachments").Run(a.conn)
+		cursor, err = rdb.DB(a.dbName).Table(table).Get(linkId).
+			Field("Attachments").Default([]string{}).Run(a.conn)
 		if err != nil {
 			return err
 		}
@@ -2610,7 +2664,10 @@ func (a *adapter) FileLinkAttachments(topic string, userId, msgId t.Uid, fids []
 		if !cursor.IsNil() {
 			var attachments []string
 			if err = cursor.One(&attachments); err != nil {
-				return err
+				if err != rdb.ErrEmptyResult {
+					return err
+				}
+				err = nil
 			}
 
 			if len(attachments) > 0 {

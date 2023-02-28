@@ -1,6 +1,7 @@
 package main
 
 import (
+	crand "crypto/rand"
 	"encoding/json"
 	"flag"
 	"io/ioutil"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/tinode/chat/server/auth"
-
 	_ "github.com/tinode/chat/server/db/mongodb"
 	_ "github.com/tinode/chat/server/db/mysql"
 	_ "github.com/tinode/chat/server/db/rethinkdb"
@@ -53,24 +53,25 @@ type DefAccess struct {
 
 /*
 User object in data.json
-   "createdAt": "-140h",
-   "email": "alice@example.com",
-   "tel": "17025550001",
-   "passhash": "alice123",
-   "private": {"comment": "some comment 123"},
-   "public": {"fn": "Alice Johnson", "photo": "alice-64.jpg", "type": "jpg"},
-   "state": "ok",
-   "authLevel": "auth",
-   "status": {
-     "text": "DND"
-   },
-   "username": "alice",
-	"tags": ["tag1"],
-	"addressBook": ["email:bob@example.com", "email:carol@example.com", "email:dave@example.com",
-		"email:eve@example.com","email:frank@example.com","email:george@example.com","email:tob@example.com",
-		"tel:17025550001", "tel:17025550002", "tel:17025550003", "tel:17025550004", "tel:17025550005",
-		"tel:17025550006", "tel:17025550007", "tel:17025550008", "tel:17025550009"]
-  }
+
+	   "createdAt": "-140h",
+	   "email": "alice@example.com",
+	   "tel": "17025550001",
+	   "passhash": "alice123",
+	   "private": {"comment": "some comment 123"},
+	   "public": {"fn": "Alice Johnson", "photo": "alice-64.jpg", "type": "jpg"},
+	   "state": "ok",
+	   "authLevel": "auth",
+	   "status": {
+	     "text": "DND"
+	   },
+	   "username": "alice",
+		"tags": ["tag1"],
+		"addressBook": ["email:bob@example.com", "email:carol@example.com", "email:dave@example.com",
+			"email:eve@example.com","email:frank@example.com","email:george@example.com","email:tob@example.com",
+			"tel:17025550001", "tel:17025550002", "tel:17025550003", "tel:17025550004", "tel:17025550005",
+			"tel:17025550006", "tel:17025550007", "tel:17025550008", "tel:17025550009"]
+	  }
 */
 type User struct {
 	CreatedAt   string      `json:"createdAt"`
@@ -91,11 +92,11 @@ type User struct {
 /*
 GroupTopic object in data.json
 
-   "createdAt": "-128h",
-   "name": "*ABC",
-   "owner": "carol",
-   "channel": true,
-   "public": {"fn": "Let's talk about flowers", "photo": "abc-64.jpg", "type": "jpg"}
+	"createdAt": "-128h",
+	"name": "*ABC",
+	"owner": "carol",
+	"channel": true,
+	"public": {"fn": "Let's talk about flowers", "photo": "abc-64.jpg", "type": "jpg"}
 */
 type GroupTopic struct {
 	CreatedAt    string    `json:"createdAt"`
@@ -112,13 +113,13 @@ type GroupTopic struct {
 /*
 GroupSub object in data.json
 
- "createdAt": "-112h",
- "private": "My super cool group topic",
- "topic": "*ABC",
- "user": "alice",
- "asChan: false,
- "want": "JRWPSA",
- "have": "JRWP"
+	"createdAt": "-112h",
+	"private": "My super cool group topic",
+	"topic": "*ABC",
+	"user": "alice",
+	"asChan: false,
+	"want": "JRWPSA",
+	"have": "JRWP"
 */
 type GroupSub struct {
 	CreatedAt string   `json:"createdAt"`
@@ -135,8 +136,10 @@ P2PUser topic in data.json
 
 "createdAt": "-117h",
 "users": [
-  {"name": "eve", "private": {"comment":"ho ho"}, "want": "JRWP", "have": "N"},
-  {"name": "alice", "private": {"comment": "ha ha"}}
+
+	{"name": "eve", "private": {"comment":"ho ho"}, "want": "JRWP", "have": "N"},
+	{"name": "alice", "private": {"comment": "ha ha"}}
+
 ]
 */
 type P2PUser struct {
@@ -174,21 +177,25 @@ func genTopicName() string {
 func getPassword(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/.+?=&"
 
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+	rbuf := make([]byte, n)
+	if _, err := crand.Read(rbuf); err != nil {
+		log.Fatalln("Unable to generate password", err)
 	}
 
-	return string(b)
+	passwd := make([]byte, n)
+	for i, r := range rbuf {
+		passwd[i] = letters[int(r)%len(letters)]
+	}
+
+	return string(passwd)
 }
 
 func main() {
 	reset := flag.Bool("reset", false, "force database reset")
 	upgrade := flag.Bool("upgrade", false, "perform database version upgrade")
 	noInit := flag.Bool("no_init", false, "check that database exists but don't create if missing")
-	uid := flag.String("uid", "", "ID of the user to update")
-	scheme := flag.String("scheme", "basic", "User's authentication scheme to update")
-	authLevel := flag.String("auth", "", "change user's authentication level (one of ROOT, AUTH, ANON)")
+	addRoot := flag.String("add_root", "", "create ROOT user, auth scheme 'basic'")
+	makeRoot := flag.String("make_root", "", "promote ordinary user to ROOT, auth scheme 'basic'")
 	datafile := flag.String("data", "", "name of file with sample data to load")
 	conffile := flag.String("config", "./tinode.conf", "config of the database connection")
 
@@ -233,7 +240,9 @@ func main() {
 	err := store.Store.Open(1, config.StoreConfig)
 	defer store.Store.Close()
 
-	log.Printf("Database adapter: '%s'; version: %d", store.Store.GetAdapterName(), store.Store.GetAdapterVersion())
+	adapterVersion := store.Store.GetAdapterVersion()
+	databaseVersion := store.Store.GetDbVersion()
+	log.Printf("Database adapter: '%s'; version: %d", store.Store.GetAdapterName(), adapterVersion)
 
 	if err != nil {
 		if strings.Contains(err.Error(), "Database not initialized") {
@@ -242,11 +251,14 @@ func main() {
 			}
 			log.Println("Database not found. Creating.")
 		} else if strings.Contains(err.Error(), "Invalid database version") {
-			msg := "Wrong DB version: expected " + strconv.Itoa(store.Store.GetAdapterVersion()) + ", got " +
-				strconv.Itoa(store.Store.GetDbVersion()) + "."
+			msg := "Wrong DB version: expected " + strconv.Itoa(adapterVersion) + ", got " +
+				strconv.Itoa(databaseVersion) + "."
 			if *reset {
 				log.Println(msg, "Dropping and recreating the database.")
 			} else if *upgrade {
+				if databaseVersion > adapterVersion {
+					log.Fatalln(msg, "Unable to upgrade: database has greater version than the adapter.")
+				}
 				log.Println(msg, "Upgrading the database.")
 			} else {
 				log.Fatalln(msg, "Use --reset to reset, --upgrade to upgrade.")
@@ -256,24 +268,6 @@ func main() {
 		}
 	} else if *reset {
 		log.Println("Database reset requested")
-	} else if *authLevel != "" {
-		level := auth.ParseAuthLevel(*authLevel)
-		if level == auth.LevelNone {
-			log.Fatalf("Invalid authentication level: '%s'", *authLevel)
-		}
-		userId := types.ParseUserId(*uid)
-		if userId.IsZero() {
-			log.Fatalf("Must specify a valid user ID to update level: '%s'", *uid)
-		}
-		if *scheme == "" {
-			log.Fatalln("Must specify user's authentication scheme to update level")
-		}
-		adapter := store.Store.GetAdapter()
-		if err := adapter.AuthUpdRecord(userId, *scheme, "", level, nil, time.Time{}); err != nil {
-			log.Fatalln("Failed to update user's auth level:", err)
-		}
-		log.Printf("User's %s level set to %s for scheme %s.", *uid, level.String(), *scheme)
-		os.Exit(0)
 	} else {
 		log.Println("Database exists, DB version is correct. All done.")
 		os.Exit(0)
@@ -306,7 +300,56 @@ func main() {
 	if !*upgrade {
 		genDb(&data)
 	} else if len(data.Users) > 0 {
-		log.Println("Sample data ignored. All done.")
+		log.Println("Sample data ignored.")
 	}
+
+	// Promote existing user account to root
+	if *makeRoot != "" {
+		adapter := store.Store.GetAdapter()
+		userId := types.ParseUserId(*makeRoot)
+		if userId.IsZero() {
+			log.Fatalf("Must specify a valid user ID '%s' to promote to ROOT", *makeRoot)
+		}
+		if err := adapter.AuthUpdRecord(userId, "basic", "", auth.LevelRoot, nil, time.Time{}); err != nil {
+			log.Fatalln("Failed to promote user to ROOT", err)
+		}
+		log.Printf("User '%s' promoted to ROOT", *makeRoot)
+	}
+
+	// Create root user account.
+	if *addRoot != "" {
+		var password string
+		parts := strings.Split(*addRoot, ":")
+		uname := parts[0]
+		if len(uname) < 3 {
+			log.Fatalf("Failed to create a ROOT user: username '%s' is too short", uname)
+		}
+
+		if len(parts) == 1 || parts[1] == "" {
+			password = getPassword(10)
+		} else {
+			password = parts[1]
+		}
+
+		var user types.User
+		user.Public = &card{
+			Fn: "ROOT " + uname,
+		}
+		store.Users.Create(&user, nil)
+
+		if _, err := store.Users.Create(&user, nil); err != nil {
+			log.Fatalln("Failed to create ROOT user:", err)
+		}
+
+		adapter := store.Store.GetAdapter()
+		if err := adapter.AuthUpdRecord(user.Uid(), "basic", "", auth.LevelRoot, nil, time.Time{}); err != nil {
+			store.Users.Delete(user.Uid(), true)
+			log.Fatalln("Failed to create ROOT user:", err)
+		}
+		log.Printf("ROOT user created: '%s:%s'", uname, password)
+	}
+
+	log.Println("All done.")
+
 	os.Exit(0)
 }
