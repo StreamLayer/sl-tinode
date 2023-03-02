@@ -1122,6 +1122,7 @@ func (t *Topic) handleNoteBroadcast(msg *ClientComMessage) {
 	}
 
 	if (msg.Note.What == "bypass" || msg.Note.What == "reaction") && (!mode.IsWriter() || t.isReadOnly()) {
+		logs.Warn.Printf("topic[%s]: dropped bypass info, isWriter: %t, topic Readnly: %t", t.name, mode.IsWriter(), t.isReadOnly())
 		return
 	}
 
@@ -1203,7 +1204,10 @@ func (t *Topic) handleNoteBroadcast(msg *ClientComMessage) {
 	}
 
 	// Read/recv/kp: notify users offline in the topic on their 'me'.
-	t.infoSubsOffline(asUid, msg.Note.What, seq, msg.sess.sid)
+	// do not notify with bypass messages or reactions
+	if msg.Note.What != "bypass" && msg.Note.What != "reaction" {
+		t.infoSubsOffline(asUid, msg.Note.What, seq, msg.sess.sid)
+	}
 
 	info := &ServerComMessage{
 		Info: &MsgServerInfo{
