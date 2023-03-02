@@ -1,8 +1,7 @@
 {
   "branches": [
     { "name": "master" },
-    { "name": "staging", "prerelease": "rc" },
-    { "name": "feat/upgrade-to-latest", "prerelease": "upgrade" }
+    { "name": "staging", "prerelease": "rc" }
   ],
   "plugins": [
     ["@semantic-release/commit-analyzer", {
