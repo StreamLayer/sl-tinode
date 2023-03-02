@@ -1090,6 +1090,9 @@ func (t *Topic) handlePubBroadcast(msg *ClientComMessage) {
 func (t *Topic) handleNoteBroadcast(msg *ClientComMessage) {
 	if t.isInactive() {
 		// Ignore broadcast - topic is paused or being deleted.
+		if msg.Note.What == "bypass" {
+			logs.Warn.Printf("topic[%s] user[%s]: dropped bypass info, topic inactive", t.name, msg.sess.sid)
+		}
 		return
 	}
 
