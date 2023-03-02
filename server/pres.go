@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"reflect"
 	"regexp"
 	"strings"
@@ -121,7 +120,7 @@ func (t *Topic) procPresReq(fromUserID, what string, wantReply bool) string {
 		cmd = parts[1]
 	}
 
-	log.Printf("topic[%s]: proc command: %s - %s", t.name, what, cmd)
+	// log.Printf("topic[%s]: proc command: %s - %s", t.name, what, cmd)
 
 	switch what {
 	case "on":
@@ -150,7 +149,7 @@ func (t *Topic) procPresReq(fromUserID, what string, wantReply bool) string {
 	if t.cat == types.TopicCatMe {
 		// Find if the contact is listed.
 		if psd, ok := t.perSubs[fromUserID]; ok {
-			log.Printf("topic[%s]: cmd - %s, psd[%s] - %v", t.name, cmd, fromUserID, psd)
+			// log.Printf("topic[%s]: cmd - %s, psd[%s] - %v", t.name, cmd, fromUserID, psd)
 
 			if cmd == "rem" {
 				replyAs = "off+rem"

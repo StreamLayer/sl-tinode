@@ -1224,6 +1224,10 @@ func (t *Topic) handleNoteBroadcast(msg *ClientComMessage) {
 		sess:      msg.sess,
 	}
 
+	if msg.Note.What == "bypass" {
+		logs.Info.Printf("topic[%s] sess[%s]: sending note to: %v", t.name, msg.sess.sid, info)
+	}
+
 	t.broadcastToSessions(info)
 }
 
