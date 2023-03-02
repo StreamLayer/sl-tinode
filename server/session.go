@@ -762,6 +762,7 @@ func (s *Session) hello(msg *ClientComMessage) {
 			"maxTagLength":       maxTagLength,
 			"maxTagCount":        globals.maxTagCount,
 			"maxFileUploadSize":  globals.maxFileUploadSize,
+			"reqCred":            globals.validatorClientConfig,
 		}
 		if len(globals.iceServers) > 0 {
 			params["iceServers"] = globals.iceServers
@@ -954,7 +955,7 @@ func (s *Session) login(msg *ClientComMessage) {
 		// Check responses. Ignore invalid responses, just keep cred unvalidated.
 		if validated, _, err = validatedCreds(rec.Uid, rec.AuthLevel, msg.Login.Cred, false); err == nil {
 			// Get a list of credentials which have not been validated.
-			_, missing = stringSliceDelta(globals.authValidators[rec.AuthLevel], validated)
+			_, missing, _ = stringSliceDelta(globals.authValidators[rec.AuthLevel], validated)
 		}
 	}
 	if err != nil {
@@ -1228,7 +1229,12 @@ func (s *Session) note(msg *ClientComMessage) {
 
 	logs.Warn.Println("s.note: debug", msg.Note.What, msg.Note.Content)
 	switch msg.Note.What {
-	case "kp":
+	case "data":
+		if msg.Note.Payload == nil {
+			// Payload must be present in 'data' notifications.
+			return
+		}
+	case "kp", "kpa", "kpv":
 		if msg.Note.SeqId != 0 {
 			return
 		}
@@ -1260,7 +1266,7 @@ func (s *Session) note(msg *ClientComMessage) {
 			logs.Err.Println("s.note: sub.broacast channel full, topic ", msg.RcptTo, s.sid)
 		}
 	} else if msg.Note.What == "recv" || msg.Note.What == "bypass" || msg.Note.What == "reaction" || (msg.Note.What == "call" && (msg.Note.Event == "ringing" || msg.Note.Event == "hang-up" || msg.Note.Event == "accept")) {
-		// One of the folowing events happened:
+		// One of the following events happened:
 		// 1. Client received a pres notification about a new message, initiated a fetch
 		// from the server (and detached from the topic) and acknowledges receipt.
 		// 2. Client is either accepting or terminating the current video call or
@@ -1283,9 +1289,10 @@ func (s *Session) note(msg *ClientComMessage) {
 
 // expandTopicName expands session specific topic name to global name
 // Returns
-//   topic: session-specific topic name the message recipient should see
-//   routeTo: routable global topic name
-//   err: *ServerComMessage with an error to return to the sender
+//
+//	topic: session-specific topic name the message recipient should see
+//	routeTo: routable global topic name
+//	err: *ServerComMessage with an error to return to the sender
 func (s *Session) expandTopicName(msg *ClientComMessage) (string, *ServerComMessage) {
 	if msg.Original == "" {
 		logs.Warn.Println("s.etn: empty topic name", s.sid)

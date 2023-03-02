@@ -61,9 +61,9 @@ import (
 
 const (
 	// currentVersion is the current API/protocol version
-	currentVersion = "0.20"
+	currentVersion = "0.21"
 	// minSupportedVersion is the minimum supported API version
-	minSupportedVersion = "0.17"
+	minSupportedVersion = "0.18"
 
 	// idleSessionTimeout defines duration of being idle before terminating a session.
 	idleSessionTimeout = time.Second * 55
@@ -111,13 +111,18 @@ const (
 )
 
 // Build version number defined by the compiler:
-// 		-ldflags "-X main.buildstamp=value_to_assign_to_buildstamp"
+//
+//	-ldflags "-X main.buildstamp=value_to_assign_to_buildstamp"
+//
 // Reported to clients in response to {hi} message.
 // For instance, to define the buildstamp as a timestamp of when the server was built add a
 // flag to compiler command line:
-// 		-ldflags "-X main.buildstamp=`date -u '+%Y%m%dT%H:%M:%SZ'`"
+//
+//	-ldflags "-X main.buildstamp=`date -u '+%Y%m%dT%H:%M:%SZ'`"
+//
 // or to set it to git tag:
-// 		-ldflags "-X main.buildstamp=`git describe --tags`"
+//
+//	-ldflags "-X main.buildstamp=`git describe --tags`"
 var buildstamp = "undef"
 
 // CredValidator holds additional config params for a credential validator.
@@ -147,6 +152,8 @@ var globals struct {
 
 	// Credential validators.
 	validators map[string]credValidator
+	// Credential validator config to pass to clients.
+	validatorClientConfig map[string][]string
 	// Validators required for each auth level.
 	authValidators map[auth.Level][]string
 
@@ -196,6 +203,17 @@ type validatorConfig struct {
 	Required []string `json:"required"`
 	// Validator params passed to validator unchanged.
 	Config json.RawMessage `json:"config"`
+}
+
+// Stale unvalidated user account GC config.
+type accountGcConfig struct {
+	Enabled bool `json:"enabled"`
+	// How often to run GC (seconds).
+	GcPeriod int `json:"gc_period"`
+	// Number of accounts to delete in one pass.
+	GcBlockSize int `json:"gc_block_size"`
+	// Minimum hours since account was last modified.
+	GcMinAccountAge int `json:"gc_min_account_age"`
 }
 
 // Large file handler config.
@@ -266,6 +284,7 @@ type configType struct {
 	TLS       json.RawMessage             `json:"tls"`
 	Auth      map[string]json.RawMessage  `json:"auth_config"`
 	Validator map[string]*validatorConfig `json:"acc_validation"`
+	AccountGC *accountGcConfig            `json:"acc_gc_config"`
 	Media     *mediaConfig                `json:"media"`
 	WebRTC    json.RawMessage             `json:"webrtc"`
 }
@@ -475,7 +494,15 @@ func main() {
 		}
 	}
 
-	// Partially restricted tag namespaces
+	// Create credential validator config for clients.
+	if len(globals.authValidators) > 0 {
+		globals.validatorClientConfig = make(map[string][]string)
+		for key, val := range globals.authValidators {
+			globals.validatorClientConfig[key.String()] = val
+		}
+	}
+
+	// Partially restricted tag namespaces.
 	globals.maskedTagNS = make(map[string]bool, len(config.MaskedTagNamespaces))
 	for _, tag := range config.MaskedTagNamespaces {
 		if strings.Contains(tag, ":") {
@@ -544,6 +571,21 @@ func main() {
 				}()
 			}
 		}
+	}
+
+	// Stale unvalidated user account garbage collection.
+	if config.AccountGC != nil && config.AccountGC.Enabled {
+		if config.AccountGC.GcPeriod <= 0 || config.AccountGC.GcBlockSize <= 0 ||
+			config.AccountGC.GcMinAccountAge <= 0 {
+			logs.Err.Fatalln("Invalid account GC config")
+		}
+		gcPeriod := time.Second * time.Duration(config.AccountGC.GcPeriod)
+		stopAccountGc := garbageCollectUsers(gcPeriod, config.AccountGC.GcBlockSize, config.AccountGC.GcMinAccountAge)
+
+		defer func() {
+			stopAccountGc <- true
+			logs.Info.Println("Stopped account garbage collector")
+		}()
 	}
 
 	pushHandlers, err := push.Init(config.Push)

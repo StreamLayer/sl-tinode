@@ -57,6 +57,9 @@ type Adapter interface {
 	// the R permission. If read fails, the counts are still returned with the original
 	// user IDs but with the unread count undefined and non-nil error.
 	UserUnreadCount(ids ...t.Uid) (map[t.Uid]int, error)
+	// UserGetUnvalidated returns a list of no more than 'limit' uids who never logged in,
+	// have no validated credentials and which haven't been updated since 'lastUpdatedBefore'.
+	UserGetUnvalidated(lastUpdatedBefore time.Time, limit int) ([]t.Uid, error)
 
 	// Credential management
 

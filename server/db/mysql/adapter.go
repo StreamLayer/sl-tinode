@@ -1377,6 +1377,40 @@ func (a *adapter) UserUnreadCount(ids ...t.Uid) (map[t.Uid]int, error) {
 	return counts, err
 }
 
+// UserGetUnvalidated returns a list of uids which have never logged in, have no
+// validated credentials and haven't been updated since lastUpdatedBefore.
+func (a *adapter) UserGetUnvalidated(lastUpdatedBefore time.Time, limit int) ([]t.Uid, error) {
+	var uids []t.Uid
+
+	ctx, cancel := a.getContext()
+	if cancel != nil {
+		defer cancel()
+	}
+
+	rows, err := a.db.QueryxContext(ctx,
+		"SELECT u.id, IFNULL(SUM(c.done),0) AS total FROM users AS u "+
+			"LEFT JOIN credentials AS c ON u.id=c.userid WHERE u.lastseen IS NULL AND u.updatedat<? "+
+			"GROUP BY u.id, u.updatedat HAVING total=0 ORDER BY u.updatedat ASC LIMIT ?", lastUpdatedBefore, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var userId int64
+		var unused int
+		if err = rows.Scan(&userId, &unused); err != nil {
+			break
+		}
+		uids = append(uids, store.EncodeUid(userId))
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+
+	return uids, err
+}
+
 // *****************************
 
 func (a *adapter) topicCreate(tx *sqlx.Tx, topic *t.Topic) error {

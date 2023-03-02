@@ -882,8 +882,8 @@ The following values are currently defined for the `head` field:
  * `priority`: message display priority: hint for the client that the message should be displayed more prominently for a set period of time; only `"high"` is currently defined; `{"level": "high", "expires": "2019-10-06T18:07:30.038Z"}`; `priority` can be set by the topic owner or administrator (`A` permission) only. The `"expires"` qualifier is optional.
  * `replace`: an indicator that the message is a correction/replacement for another message, a topic-unique ID of the message being updated/replaced, `":123"`
  * `reply`: an indicator that the message is a reply to another message, a unique ID of the original message, `"grp1XUtEhjv6HND:123"`.
- * `sender`: a user ID of the sender added by the server when the message is sent by on behalf of another user, `"usr1XUtEhjv6HND"`.
- * `thread`: an indicator that the message is a part of a conversation thread, a topic-unique ID of the first message in the thread, `":123"`; `thread` is intended for tagging a flat list of messages as opposite to a creating a tree.
+ * `sender`: a user ID of the sender added by the server when the message is sent on behalf of another user, `"usr1XUtEhjv6HND"`.
+ * `thread`: an indicator that the message is a part of a conversation thread, a topic-unique ID of the first message in the thread, `":123"`; `thread` is intended for tagging a flat list of messages as opposite to creating a tree.
  * `webrtc`: a string representing the state of the video call the message represents. Possible values:
    * `"started"`: call has been initiated and being established
    * `"accepted"`: call has been accepted and established
@@ -891,7 +891,7 @@ The following values are currently defined for the `head` field:
    * `"missed"`: call was hung up by the caller or timed out before getting established
    * `"declined"`: call was hung up by the callee before getting established
    * `"disconnected"`: call was terminated by the server for other reasons (e.g. due to an error)
- * `webrtc-duration`: a number represeting video call duration after establishment (in milliseconds).
+ * `webrtc-duration`: a number representing a video call duration (in milliseconds).
 
 Application-specific fields should start with an `x-<application-name>-`. Although the server does not enforce this rule yet, it may start doing so in the future.
 
@@ -1081,23 +1081,25 @@ The `{note.recv}` and `{note.read}` do alter persistent state on the server. The
 ```js
 note: {
   topic: "grp1XUtEhjv6HND", // string, topic to notify, required
-  what: "kp", // string, one of "kp" (key press), "read" (read notification),
-              // "recv" (received notification), "data" (form response or other structured data);
-              // any other string will cause the message to be silently ignored, required.
+  what: "kp", // string, action type of the notification.
   seq: 123,   // integer, ID of the message being acknowledged, required for
               // 'recv' & 'read'.
   unread: 10, // integer, client-reported total count of unread messages, optional.
-  data: {     // object, required payload for 'data'.
+  payload: {  // object, required payload for 'call' and 'data'.
     ...
   }
 }
 ```
 
-The following actions are currently recognised:
- * kp: key press, i.e. a typing notification. The client should use it to indicate that the user is composing a new message.
- * recv: a `{data}` message is received by the client software but may not yet seen by user.
- * read: a `{data}` message is seen by the user. It implies `recv` as well.
+The following actions types are currently defined:
+ * call: a video call status update.
+ * cala: an audio call status update.
  * data: a generic packet of structured data, usually a form response.
+ * kp: key press, i.e. a typing notification. The client should use it to indicate that the user is composing a new message.
+ * kpa: audio message is in the process of recording.
+ * kpv: video message is in the process of recording.
+ * read: a `{data}` message is seen (read) by the user. It implies `recv` as well.
+ * recv: a `{data}` message is received by the client software but may not yet seen by user.
 
 The `read` and `recv` notifications may optionally include `unread` value which is the total count of unread messages as determined by this client. The per-user `unread` count is maintained by the server: it's incremented when new `{data}` messages are sent to user and reset to the values reported by the `{note unread=...}` message. The `unread` value is never decremented by the server. The value is included in push notifications to be shown on a badge on iOS:
 <p align="center">
@@ -1272,7 +1274,7 @@ Tinode uses `{pres}` message to inform clients of important events. A separate [
 pres: {
   topic: "me", // string, topic which receives the notification, always present
   src: "grp1XUtEhjv6HND", // string, topic or user affected by the change, always present
-  what: "on", // string, what's changed, always present
+  what: "on", // string, action type, what's changed, always present
   seq: 123, // integer, "what" is "msg", a server-issued ID of the message,
             // optional
   clear: 15, // integer, "what" is "del", an update to the delete transaction ID.
@@ -1286,6 +1288,22 @@ pres: {
                           // optional
 }
 ```
+
+The following action types are currently defined:
+
+ * on: topic or user came online
+ * off: topic or user went offline
+ * ua: user agent changed, for example user was logged in with one client, then logged in with another
+ * upd: topic description has changed
+ * tags: topic tags have changed
+ * acs: access permissions have changed
+ * gone: topic is no longer available, for example, it was deleted or you were unsubscribed from it
+ * term: subscription to topic has been terminated, you may try to resubscribe
+ * msg: a new message is available
+ * read: one or more messages have been read by the recipient
+ * recv: one or more messages have been received by the recipient
+ * del: messages were deleted
+
 
 The `{pres}` messages are purely transient: they are not stored and no attempt is made to deliver them later if the destination is temporarily unavailable.
 

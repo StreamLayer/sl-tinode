@@ -3,12 +3,15 @@ package email
 
 import (
 	"bytes"
+	crand "crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"math/rand"
+	"mime"
 	qp "mime/quotedprintable"
 	"net/mail"
 	"net/smtp"
@@ -362,8 +365,11 @@ func (v *validator) Request(user t.Uid, email, lang, resp string, tmpToken []byt
 	base64.StdEncoding.Encode(token, tmpToken)
 
 	// Generate expected response as a random numeric string between 0 and 999999.
-	// The PRNG is already initialized in main.go. No need to initialize it here again.
-	resp = strconv.FormatInt(int64(rand.Intn(maxCodeValue)), 10)
+	code, err := crand.Int(crand.Reader, big.NewInt(maxCodeValue))
+	if err != nil {
+		return false, err
+	}
+	resp = strconv.FormatInt(code.Int64(), 10)
 	resp = strings.Repeat("0", codeLength-len(resp)) + resp
 
 	var template *textt.Template
@@ -479,7 +485,6 @@ func (v *validator) Remove(user t.Uid, value string) error {
 }
 
 // SendMail replacement
-//
 func (v *validator) sendMail(rcpt []string, msg []byte) error {
 
 	client, err := smtp.Dial(v.SMTPAddr + ":" + v.SMTPPort)
@@ -540,7 +545,11 @@ func (v *validator) send(to string, content *emailContent) error {
 	// Common headers.
 	fmt.Fprintf(message, "From: %s\r\n", v.SendFrom)
 	fmt.Fprintf(message, "To: %s\r\n", to)
-	fmt.Fprintf(message, "Subject: %s\r\n", content.subject)
+	message.WriteString("Subject: ")
+	// Old email clients may barf on UTF-8 strings.
+	// Encode as quoted printable with 75-char strings separated by spaces, split by spaces, reassemble.
+	message.WriteString(strings.Join(strings.Split(mime.QEncoding.Encode("utf-8", content.subject), " "), "\r\n    "))
+	message.WriteString("\r\n")
 	message.WriteString("MIME-version: 1.0;\r\n")
 
 	if content.html == "" {

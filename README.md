@@ -39,7 +39,7 @@ See [general instructions](./INSTALL.md) or [docker-specific instructions](./doc
 
 ## Public service
 
-A [public Tinode service](https://web.tinode.co/) is now available. You can use it just like any other instant messenger. Keep in mind that demo accounts present in [sandbox](https://sandbox.tinode.co/) are not available in the public service. You must register an account using valid email in order to use the service.
+A [public Tinode service](https://web.tinode.co/) is available. You can use it just like any other instant messenger. Keep in mind that demo accounts present in [sandbox](https://sandbox.tinode.co/) are not available in the public service. You must register an account using valid email in order to use the service.
 
 ### Web
 
@@ -82,19 +82,20 @@ When you register a new account you are asked for an email address to send valid
   * [Web](https://github.com/tinode/webapp/) (React.js)
   * Scriptable [command line](tn-cli/) (Python)
 * User features:
-  * One-on-one and group messaging. Voice messages.
-  * Video and audio calling.
+  * One-on-one and group messaging.
+  * Video and voice calls. Voice messages.
   * Channels with unlimited number of read-only subscribers.
   * All chats are synchronized across all devices.
   * Granular access control with permissions for various actions.
   * User search/discovery.
-  * Rich formatting of messages markdown-style: \*style\* &rarr; **style**, with inline images, file attachments.
+  * Rich formatting of messages markdown-style: \*style\* &rarr; **style**, with inline images, videos, file attachments.
   * Forms and templated responses suitable for chatbots.
   * Verified/staff/untrusted account markers.
   * Message status notifications: message delivery to server; received and read notifications; typing notifications.
   * Most recent message preview in contact list.
   * Server-generated presence notifications for people, group chats.
   * Forwarding and replying to messages.
+  * Editing sent messages.
 * Administration:
   * Granular access control with permissions for various actions.
   * Support for custom authentication backends.
@@ -116,8 +117,11 @@ When you register a new account you are asked for an email address to send valid
 ### Planned
 
 * [Federation](https://en.wikipedia.org/wiki/Federation_(information_technology)).
-* Location sharing.
-* Previews of attached videos, documents, links.
+* Location and contacts sharing.
+* Previews of attached documents, links.
+* Recording video messages.
+* Better emoji support.
+* Attaching music/audio other than voice messages.
 * Hot standby.
 * Different levels of message persistence (from strict persistence to "store until delivered" to purely ephemeral messaging).
 * Message encryption at rest.
@@ -136,6 +140,7 @@ All client software has support for [internationalization](docs/translations.md)
 | French | &check; | &check; | &check; |   |
 | German |   | &check; | &check; |   |
 | Korean |   | &check; | &check; |   |
+| Portugese | &check; |   | &check; |   |
 | Romanian |   | &check; |   |   |
 | Russian | &check; | &check; | &check; | &check; |
 | Spanish | &check; | &check; | &check; | &check; |
@@ -169,7 +174,7 @@ More translations are [welcome](docs/translations.md). Particularly interested i
 ### [iOS](https://github.com/tinode/ios)
 
 <p align="center">
-<img src="docs/ios-contacts.png" alt="iOS screenshot: list of chats" width=207 /> <img src="docs/ios-chat.png" alt="iOS screenshot: one conversation" width=207 /> <img src="docs/ios-acc-personal.png" alt="iOS screenshot: account settings" width="207" />
+<img src="docs/ios-contacts.png" alt="iOS screenshot: list of chats" width=250 /> <img src="docs/ios-chat.png" alt="iOS screenshot: one conversation" width=250 /> <img src="docs/ios-video-call.png" alt="iOS screenshot: video call" width="250" />
 </p>
 
 ### [Desktop Web](https://github.com/tinode/webapp/)
