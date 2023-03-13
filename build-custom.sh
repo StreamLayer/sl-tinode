@@ -6,7 +6,7 @@ set -ex
 # usage "./build-custom.sh tag=v0.15.9"
 goplat=( linux )
 goarc=( amd64 )
-dbtags=( rethinkdb  mongodb )
+dbtags=( mongodb )
 releasepath="./docker/tinode/releases"
 repository="gcr.io/peak-orbit-214114"
 
@@ -85,7 +85,7 @@ do
       cp ./server/templ/*.templ ${tmppath}/templ
       cp ./server/static/img/*.png ${tmppath}/static/img
       cp ./server/static/img/*.svg ${tmppath}/static/img
-      cp ./server/static/audio/*.mp3 ${tmppath}/static/audio
+      cp ./server/static/audio/*.m4a ${tmppath}/static/audio
       cp ./server/static/css/*.css ${tmppath}/static/css
       cp ./server/static/index.html ${tmppath}/static
       cp ./server/static/index-dev.html ${tmppath}/static
