@@ -2,7 +2,7 @@
   "branches": [
     { "name": "master" },
     { "name": "staging", "prerelease": "rc" },
-    { "name": "qa", "prerelease": "rc" }
+    { "name": "qa", "prerelease": "debug" }
   ],
   "plugins": [
     ["@semantic-release/commit-analyzer", {
