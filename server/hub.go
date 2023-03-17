@@ -10,6 +10,7 @@
 package main
 
 import (
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -220,6 +221,8 @@ func (h *Hub) run() {
 						" - total queue len:", len(t.reg))
 				}
 			}
+
+			log.Printf("hub.join loop: topic: %v join.sess.sid: %v total queue len: %d", join.RcptTo, join.sess.sid, len(t.reg))
 
 		case msg := <-h.routeCli:
 			// This is a message from a session not subscribed to topic

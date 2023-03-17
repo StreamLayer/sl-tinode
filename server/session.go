@@ -197,6 +197,10 @@ func (s *Session) addSub(topic string, sub *Subscription) {
 }
 
 func (s *Session) getSub(topic string) *Subscription {
+	log.Printf("getSub. Topic(msg.RcptTo): %v Sid: %v UID: %v\n", topic, s.sid, s.uid)
+	if s.subs != nil {
+		log.Printf("subs: %d", len(s.subs))
+	}
 	// Don't check s.multi here. Let it panic if called for proxy session.
 
 	s.subsLock.RLock()
@@ -634,6 +638,9 @@ func (s *Session) subscribe(msg *ClientComMessage) {
 			return
 		}
 	}
+
+	log.Printf("globals maxSubscriberCount %d", globals.maxSubscriberCount)
+	log.Printf("Current number of loaded topics %d", globals.hub.numTopics)
 
 	// Session can subscribe to topic on behalf of a single user at a time.
 	if sub := s.getSub(msg.RcptTo); sub != nil {
