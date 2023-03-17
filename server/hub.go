@@ -209,6 +209,9 @@ func (h *Hub) run() {
 					join.sess.queueOut(ErrLockedReply(join, join.Timestamp))
 					continue
 				}
+
+				log.Printf("hub.join loop: topic: %v join.sess.sid: %v total queue len: %d", join.RcptTo, join.sess.sid, len(t.reg))
+
 				// Topic will check access rights and send appropriate {ctrl}
 				select {
 				case t.reg <- join:
@@ -222,12 +225,11 @@ func (h *Hub) run() {
 				}
 			}
 
-			log.Printf("hub.join loop: topic: %v join.sess.sid: %v total queue len: %d", join.RcptTo, join.sess.sid, len(t.reg))
-
 		case msg := <-h.routeCli:
 			// This is a message from a session not subscribed to topic
 			// Route incoming message to topic if topic permits such routing.
 			if dst := h.topicGet(msg.RcptTo); dst != nil {
+				log.Printf("message from a session not subscribed to topic: %v join.sess.sid: %v loaded topics: %d", msg.RcptTo, msg.sess.sid, h.numTopics)
 				// Everything is OK, sending packet to known topic
 				if dst.clientMsg != nil {
 					select {
