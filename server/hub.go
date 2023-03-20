@@ -108,8 +108,11 @@ func newHub() *Hub {
 	h := &Hub{
 		topics: &sync.Map{},
 		// TODO: verify if these channels have to be buffered.
-		routeCli:   make(chan *ClientComMessage, 4096),
-		routeSrv:   make(chan *ServerComMessage, 4096),
+		// routeCli: make(chan *ClientComMessage, 4096),
+		// routeSrv: make(chan *ServerComMessage, 4096),
+		routeCli: make(chan *ClientComMessage, 8192),
+		routeSrv: make(chan *ServerComMessage, 8192),
+		// join:     make(chan *ClientComMessage, 512),
 		join:       make(chan *ClientComMessage, 256),
 		unreg:      make(chan *topicUnreg, 256),
 		rehash:     make(chan bool),
