@@ -28,11 +28,11 @@ const (
 	// Number of replicas in ringhash.
 	clusterHashReplicas = 20
 	// Buffer size for sending requests from proxy to master.
-	clusterProxyToMasterBuffer = 128
+	clusterProxyToMasterBuffer = 512
 	// Buffer size for master to proxy answers, per node.
 	clusterMasterToProxyBuffer = 128
 	// Buffer size for receiving responses from other nodes, per node.
-	clusterRpcCompletionBuffer = 128
+	clusterRpcCompletionBuffer = 512
 )
 
 // ProxyReqType is the type of proxy requests.
