@@ -7,7 +7,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"time"
 
@@ -88,11 +87,7 @@ func (t *Topic) runProxy(hub *Hub) {
 				tmpSess.userAgent = upd.sess.userAgent
 			}
 			if err := globals.cluster.routeToTopicMaster(req, nil, t.name, tmpSess); err != nil {
-				// TODO add logs here
 				logs.Warn.Printf("proxy topic[%s]: route sess update request from proxy to master failed - %s tmpSess: %v", t.name, err, tmpSess.sid)
-				if tmpSess.subs != nil {
-					log.Printf("proxy routeToTopicMaster Subs: %d Topic(%s) Sid: %v UID: %v\n", len(tmpSess.subs), t.name, tmpSess.sid, tmpSess.uid)
-				}
 			}
 
 		case msg := <-t.proxy:

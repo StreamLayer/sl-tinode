@@ -108,12 +108,9 @@ func newHub() *Hub {
 	h := &Hub{
 		topics: &sync.Map{},
 		// TODO: verify if these channels have to be buffered.
-		// routeCli: make(chan *ClientComMessage, 4096),
-		// routeSrv: make(chan *ServerComMessage, 4096),
-		routeCli: make(chan *ClientComMessage, 8192),
-		routeSrv: make(chan *ServerComMessage, 8192),
-		join:     make(chan *ClientComMessage, 512),
-		// join:       make(chan *ClientComMessage, 256),
+		routeCli:   make(chan *ClientComMessage, 8192),
+		routeSrv:   make(chan *ServerComMessage, 8192),
+		join:       make(chan *ClientComMessage, 512),
 		unreg:      make(chan *topicUnreg, 512),
 		rehash:     make(chan bool),
 		meta:       make(chan *ClientComMessage, 256),
@@ -212,8 +209,6 @@ func (h *Hub) run() {
 					join.sess.queueOut(ErrLockedReply(join, join.Timestamp))
 					continue
 				}
-
-				log.Printf("hub.join loop: topic: %v join.sess.sid: %v total queue len: %d", join.RcptTo, join.sess.sid, len(t.reg))
 
 				// Topic will check access rights and send appropriate {ctrl}
 				select {
