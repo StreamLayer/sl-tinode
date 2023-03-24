@@ -10,6 +10,7 @@
 package main
 
 import (
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -107,13 +108,13 @@ func newHub() *Hub {
 	h := &Hub{
 		topics: &sync.Map{},
 		// TODO: verify if these channels have to be buffered.
-		routeCli:   make(chan *ClientComMessage, 4096),
-		routeSrv:   make(chan *ServerComMessage, 4096),
-		join:       make(chan *ClientComMessage, 256),
-		unreg:      make(chan *topicUnreg, 256),
+		routeCli:   make(chan *ClientComMessage, 8192),
+		routeSrv:   make(chan *ServerComMessage, 8192),
+		join:       make(chan *ClientComMessage, 512),
+		unreg:      make(chan *topicUnreg, 512),
 		rehash:     make(chan bool),
-		meta:       make(chan *ClientComMessage, 128),
-		userStatus: make(chan *userStatusReq, 128),
+		meta:       make(chan *ClientComMessage, 256),
+		userStatus: make(chan *userStatusReq, 256),
 		shutdown:   make(chan chan<- bool),
 	}
 
@@ -173,22 +174,22 @@ func (h *Hub) run() {
 					// Indicates a proxy topic.
 					isProxy:   globals.cluster.isRemoteTopic(join.RcptTo),
 					sessions:  make(map[*Session]perSessionData),
-					clientMsg: make(chan *ClientComMessage, 192),
-					serverMsg: make(chan *ServerComMessage, 64),
+					clientMsg: make(chan *ClientComMessage, 512),
+					serverMsg: make(chan *ServerComMessage, 256),
 					reg:       make(chan *ClientComMessage, 256),
 					unreg:     make(chan *ClientComMessage, 256),
-					meta:      make(chan *ClientComMessage, 64),
+					meta:      make(chan *ClientComMessage, 128),
 					perUser:   make(map[types.Uid]perUserData),
 					exit:      make(chan *shutDown, 1),
 				}
 				if globals.cluster != nil {
 					if t.isProxy {
-						t.proxy = make(chan *ClusterResp, 32)
+						t.proxy = make(chan *ClusterResp, 128)
 						t.masterNode = globals.cluster.ring.Get(t.name)
 					} else {
 						// It's a master topic. Make a channel for handling
 						// direct messages from the proxy.
-						t.master = make(chan *ClusterSessUpdate, 8)
+						t.master = make(chan *ClusterSessUpdate, 64)
 					}
 				}
 				// Topic is created in suspended state because it's not yet configured.
@@ -208,6 +209,7 @@ func (h *Hub) run() {
 					join.sess.queueOut(ErrLockedReply(join, join.Timestamp))
 					continue
 				}
+
 				// Topic will check access rights and send appropriate {ctrl}
 				select {
 				case t.reg <- join:
@@ -225,6 +227,7 @@ func (h *Hub) run() {
 			// This is a message from a session not subscribed to topic
 			// Route incoming message to topic if topic permits such routing.
 			if dst := h.topicGet(msg.RcptTo); dst != nil {
+				log.Printf("message from a session not subscribed to topic: %v join.sess.sid: %v loaded topics: %d", msg.RcptTo, msg.sess.sid, h.numTopics)
 				// Everything is OK, sending packet to known topic
 				if dst.clientMsg != nil {
 					select {

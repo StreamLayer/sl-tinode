@@ -87,7 +87,7 @@ func (t *Topic) runProxy(hub *Hub) {
 				tmpSess.userAgent = upd.sess.userAgent
 			}
 			if err := globals.cluster.routeToTopicMaster(req, nil, t.name, tmpSess); err != nil {
-				logs.Warn.Printf("proxy topic[%s]: route sess update request from proxy to master failed - %s", t.name, err)
+				logs.Warn.Printf("proxy topic[%s]: route sess update request from proxy to master failed - %s tmpSess: %v", t.name, err, tmpSess.sid)
 			}
 
 		case msg := <-t.proxy:
