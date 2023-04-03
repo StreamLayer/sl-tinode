@@ -199,6 +199,8 @@ func (s *Session) addSub(topic string, sub *Subscription) {
 func (s *Session) getSub(topic string) *Subscription {
 	// Don't check s.multi here. Let it panic if called for proxy session.
 
+	logs.Info.Printf("getSub SID[%s] tpic[%s]", s.sid, topic)
+
 	s.subsLock.RLock()
 	defer s.subsLock.RUnlock()
 
@@ -613,7 +615,12 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 
 	// Notify 'me' topic that this session is currently active.
 	if uaRefresh && msg.AsUser != "" && s.userAgent != "" {
+
+		logs.Info.Printf("dispatch MSG. SID[%s] routeTo[%s] UA[%s]", s.sid, msg.AsUser, s.userAgent)
+
 		if sub := s.getSub(msg.AsUser); sub != nil {
+			logs.Info.Println("(getSub) sub: ", sub)
+
 			// The chan is buffered. If the buffer is exhaused, the session will wait for 'me' to become available
 			sub.supd <- &sessionUpdate{userAgent: s.userAgent}
 		}
@@ -1081,6 +1088,11 @@ func (s *Session) get(msg *ClientComMessage) {
 	msg.MetaWhat = parseMsgClientMeta(msg.Get.What)
 
 	sub := s.getSub(msg.RcptTo)
+
+	if sub != nil {
+		logs.Info.Printf("get sub SID[%s] What[%s]", s.sid, msg.Get.What)
+	}
+
 	if msg.MetaWhat == 0 {
 		s.queueOut(ErrMalformedReply(msg, msg.Timestamp))
 		logs.Warn.Println("s.get: invalid Get message action", msg.Get.What)
