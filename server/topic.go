@@ -60,9 +60,9 @@ type Topic struct {
 	tags []string
 
 	// Topic's public data
-	public interface{}
+	public any
 	// Topic's trusted data
-	trusted interface{}
+	trusted any
 
 	// Topic's per-subscriber data
 	perUser map[types.Uid]perUserData
@@ -137,14 +137,14 @@ type perUserData struct {
 	// ID of the latest Delete operation
 	delID int
 
-	private interface{}
+	private any
 
 	modeWant  types.AccessMode
 	modeGiven types.AccessMode
 
 	// P2P only:
-	public   interface{}
-	trusted  interface{}
+	public   any
+	trusted  any
 	lastSeen *time.Time
 	lastUA   string
 
@@ -959,7 +959,7 @@ func (t *Topic) sendSubNotifications(asUid types.Uid, sid, userAgent string) {
 
 // Saves a new message (defined by head, content and attachments) in the topic
 // in response to a client request (msg, asUid) and broadcasts it to the attached sessions.
-func (t *Topic) saveAndBroadcastMessage(msg *ClientComMessage, asUid types.Uid, noEcho bool, attachments []string, head map[string]interface{}, content interface{}) error {
+func (t *Topic) saveAndBroadcastMessage(msg *ClientComMessage, asUid types.Uid, noEcho bool, attachments []string, head map[string]any, content any) error {
 	pud, userFound := t.perUser[asUid]
 	// Anyone is allowed to post to 'sys' topic.
 	if t.cat != types.TopicCatSys {
@@ -970,7 +970,19 @@ func (t *Topic) saveAndBroadcastMessage(msg *ClientComMessage, asUid types.Uid, 
 		}
 	}
 
-	if err := store.Messages.Save(
+	if msg.sess != nil && msg.sess.uid != asUid {
+		// The "sender" header contains ID of the user who sent the message on behalf of asUid.
+		if head == nil {
+			head = map[string]any{}
+		}
+		head["sender"] = msg.sess.uid.UserId()
+	} else if head != nil {
+		// Make sure the received Head does not include a fake "sender" header.
+		delete(head, "sender")
+	}
+
+	markedReadBySender := false
+	if err, unreadUpdated := store.Messages.Save(
 		&types.Message{
 			ObjHeader: types.ObjHeader{CreatedAt: msg.Timestamp},
 			SeqId:     t.lastID + 1,
@@ -983,6 +995,8 @@ func (t *Topic) saveAndBroadcastMessage(msg *ClientComMessage, asUid types.Uid, 
 		msg.sess.queueOut(ErrUnknown(msg.Id, t.original(asUid), msg.Timestamp))
 
 		return err
+	} else {
+		markedReadBySender = unreadUpdated
 	}
 
 	t.lastID++
@@ -995,7 +1009,7 @@ func (t *Topic) saveAndBroadcastMessage(msg *ClientComMessage, asUid types.Uid, 
 
 	if msg.Id != "" && msg.sess != nil {
 		reply := NoErrAccepted(msg.Id, t.original(asUid), msg.Timestamp)
-		reply.Ctrl.Params = map[string]interface{}{"seq": t.lastID}
+		reply.Ctrl.Params = map[string]any{"seq": t.lastID}
 		msg.sess.queueOut(reply)
 	}
 
@@ -1032,7 +1046,7 @@ func (t *Topic) saveAndBroadcastMessage(msg *ClientComMessage, asUid types.Uid, 
 	logs.Warn.Printf("prep to pushForData[%s]: message: %v", asUid, msg.sess)
 
 	// sendPush will update unread message count and send push notification.
-	if pushRcpt := t.pushForData(asUid, data.Data, msg.OrganizationId); pushRcpt != nil {
+	if pushRcpt := t.pushForData(asUid, data.Data, markedReadBySender, msg.OrganizationId); pushRcpt != nil {
 		sendPush(pushRcpt)
 	}
 	return nil
@@ -1171,7 +1185,7 @@ func (t *Topic) handleNoteBroadcast(msg *ClientComMessage) {
 			topicName = msg.Note.Topic
 		}
 
-		upd := map[string]interface{}{}
+		upd := map[string]any{}
 		if recv > 0 {
 			upd["RecvSeqId"] = recv
 		}
@@ -1305,17 +1319,15 @@ func (t *Topic) broadcastToSessions(msg *ServerComMessage) {
 					continue
 				}
 			}
-		} else {
+		} else if pssd.isChanSub && types.IsChannel(sess.sid) {
 			// If it's a chnX multiplexing session, check if there's a corresponding
 			// grpX multiplexing session as we don't want to send the message to both.
-			if pssd.isChanSub && types.IsChannel(sess.sid) {
-				grpSid := types.ChnToGrp(sess.sid)
-				if grpSess := globals.sessionStore.Get(grpSid); grpSess != nil && grpSess.isMultiplex() {
-					// If grpX multiplexing session's attached to topic, skip this chnX session
-					// (message will be routed to the topic proxy via the grpX session).
-					if _, attached := t.sessions[grpSess]; attached {
-						continue
-					}
+			grpSid := types.ChnToGrp(sess.sid)
+			if grpSess := globals.sessionStore.Get(grpSid); grpSess != nil && grpSess.isMultiplex() {
+				// If grpX multiplexing session's attached to topic, skip this chnX session
+				// (message will be routed to the topic proxy via the grpX session).
+				if _, attached := t.sessions[grpSess]; attached {
+					continue
 				}
 			}
 		}
@@ -1361,7 +1373,7 @@ func (t *Topic) subscriptionReply(asChan bool, msg *ClientComMessage) error {
 		msgsub.Newsub = !found || pud.deleted
 	}
 
-	var private interface{}
+	var private any
 	var mode string
 	if msgsub.Set != nil {
 		if msgsub.Set.Sub != nil {
@@ -1409,7 +1421,7 @@ func (t *Topic) subscriptionReply(asChan bool, msg *ClientComMessage) error {
 		}
 	}
 
-	params := map[string]interface{}{}
+	params := map[string]any{}
 	// Report back the assigned access mode.
 	if modeChanged != nil {
 		params["acs"] = modeChanged
@@ -1466,7 +1478,7 @@ func (t *Topic) subscriptionReply(asChan bool, msg *ClientComMessage) error {
 // E. User is accepting ownership transfer (requesting ownership transfer is not permitted).
 // In case of a group topic the user may be a reader or a full subscriber.
 func (t *Topic) thisUserSub(sess *Session, pkt *ClientComMessage, asUid types.Uid, asChan bool, want string,
-	private interface{}) (*MsgAccessMode, error) {
+	private any) (*MsgAccessMode, error) {
 
 	now := types.TimeNow()
 	asLvl := auth.Level(pkt.AuthLvl)
@@ -1623,7 +1635,7 @@ func (t *Topic) thisUserSub(sess *Session, pkt *ClientComMessage, asUid types.Ui
 		} else if asChan && userData.modeWant != oldWant {
 			// Channel reader changed access mode, save changed mode to db.
 			if err := store.Subs.Update(tname, asUid,
-				map[string]interface{}{"ModeWant": userData.modeWant}); err != nil {
+				map[string]any{"ModeWant": userData.modeWant}); err != nil {
 				sess.queueOut(ErrUnknownReply(pkt, now))
 				return nil, err
 			}
@@ -1723,7 +1735,7 @@ func (t *Topic) thisUserSub(sess *Session, pkt *ClientComMessage, asUid types.Ui
 		}
 
 		// Save changes to DB
-		update := map[string]interface{}{}
+		update := map[string]any{}
 		if isNullValue(private) {
 			update["Private"] = nil
 			userData.private = nil
@@ -1757,7 +1769,7 @@ func (t *Topic) thisUserSub(sess *Session, pkt *ClientComMessage, asUid types.Ui
 			oldOwnerData.modeGiven = (oldOwnerData.modeGiven & ^types.ModeOwner)
 			oldOwnerData.modeWant = (oldOwnerData.modeWant & ^types.ModeOwner)
 			if err := store.Subs.Update(t.name, t.owner,
-				map[string]interface{}{
+				map[string]any{
 					"ModeWant":  oldOwnerData.modeWant,
 					"ModeGiven": oldOwnerData.modeGiven,
 				}); err != nil {
@@ -2002,7 +2014,7 @@ func (t *Topic) anotherUserSub(sess *Session, asUid, target types.Uid, asChan bo
 
 			// Save changed value to database
 			if err := store.Subs.Update(t.name, target,
-				map[string]interface{}{"ModeGiven": modeGiven}); err != nil {
+				map[string]any{"ModeGiven": modeGiven}); err != nil {
 				return nil, err
 			}
 
@@ -2165,7 +2177,7 @@ func (t *Topic) replySetDesc(sess *Session, asUid types.Uid, asChan bool,
 	authLevel auth.Level, msg *ClientComMessage) error {
 	now := types.TimeNow()
 
-	assignAccess := func(upd map[string]interface{}, mode *MsgDefaultAcsMode) error {
+	assignAccess := func(upd map[string]any, mode *MsgDefaultAcsMode) error {
 		if mode == nil {
 			return nil
 		}
@@ -2202,7 +2214,7 @@ func (t *Topic) replySetDesc(sess *Session, asUid types.Uid, asChan bool,
 		return nil
 	}
 
-	assignGenericValues := func(upd map[string]interface{}, what string, dst, src interface{}) (changed bool) {
+	assignGenericValues := func(upd map[string]any, what string, dst, src any) (changed bool) {
 		if dst, changed = mergeInterfaces(dst, src); changed {
 			upd[what] = dst
 		}
@@ -2216,9 +2228,9 @@ func (t *Topic) replySetDesc(sess *Session, asUid types.Uid, asChan bool,
 	var err error
 
 	// Change to the main object (user or topic).
-	core := make(map[string]interface{})
+	core := make(map[string]any)
 	// Change to subscription.
-	sub := make(map[string]interface{})
+	sub := make(map[string]any)
 	if set := msg.Set; set.Desc != nil {
 		if set.Desc.Trusted != nil && authLevel != auth.LevelRoot {
 			// Only ROOT can change Trusted.
@@ -2447,8 +2459,9 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 							return errors.New("attempt to search by restricted tags")
 						}
 
-						// TODO: allow root to find suspended users and topics.
-						subs, err = store.Users.FindSubs(asUid, req, opt)
+						// Ordinary users: find only active topics and accounts.
+						// Root users: find all topics and accounts, including suspended and soft-deleted.
+						subs, err = store.Users.FindSubs(asUid, req, opt, sess.authLvl != auth.LevelRoot)
 						if err != nil {
 							sess.queueOut(decodeStoreErrorExplicitTs(err, id, msg.Original, now, incomingReqTs, nil))
 							return err
@@ -2659,7 +2672,7 @@ func (t *Topic) replyGetSub(sess *Session, asUid types.Uid, authLevel auth.Level
 		sess.queueOut(&ServerComMessage{Meta: meta})
 	} else {
 		// Inform the client that there are no subscriptions.
-		sess.queueOut(NoContentParamsReply(msg, now, map[string]interface{}{"what": "sub"}))
+		sess.queueOut(NoContentParamsReply(msg, now, map[string]any{"what": "sub"}))
 	}
 
 	return nil
@@ -2702,7 +2715,7 @@ func (t *Topic) replySetSub(sess *Session, pkt *ClientComMessage, asChan bool) e
 	var resp *ServerComMessage
 	if modeChanged != nil {
 		// Report resulting access mode.
-		params := map[string]interface{}{"acs": modeChanged}
+		params := map[string]any{"acs": modeChanged}
 		if target != asUid {
 			params["user"] = target.UserId()
 		}
@@ -2767,10 +2780,10 @@ func (t *Topic) replyGetData(sess *Session, asUid types.Uid, asChan bool, req *M
 
 	// Inform the requester that all the data has been served.
 	if count == 0 {
-		sess.queueOut(NoContentParamsReply(msg, now, map[string]interface{}{"what": "data"}))
+		sess.queueOut(NoContentParamsReply(msg, now, map[string]any{"what": "data"}))
 	} else {
 		sess.queueOut(NoErrDeliveredParams(msg.Id, msg.Original, now,
-			map[string]interface{}{"what": "data", "count": count}))
+			map[string]any{"what": "data", "count": count}))
 	}
 
 	return nil
@@ -2829,7 +2842,7 @@ func (t *Topic) replySetTags(sess *Session, asUid types.Uid, msg *ClientComMessa
 		} else {
 			added, removed, _ := stringSliceDelta(t.tags, tags)
 			if len(added) > 0 || len(removed) > 0 {
-				update := map[string]interface{}{"Tags": tags, "UpdatedAt": now}
+				update := map[string]any{"Tags": tags, "UpdatedAt": now}
 				if t.cat == types.TopicCatMe {
 					err = store.Users.Update(asUid, update)
 				} else if t.cat == types.TopicCatGrp {
@@ -2842,7 +2855,7 @@ func (t *Topic) replySetTags(sess *Session, asUid types.Uid, msg *ClientComMessa
 					t.tags = tags
 					t.presSubsOnline("tags", "", nilPresParams, &presFilters{singleUser: asUid.UserId()}, sess.sid)
 
-					params := make(map[string]interface{})
+					params := make(map[string]any)
 					if len(added) > 0 {
 						params["added"] = len(added)
 					}
@@ -3347,7 +3360,7 @@ func (t *Topic) evictUser(uid types.Uid, unsub bool, skip string) {
 
 	// Detach all user's sessions
 	msg := NoErrEvicted("", t.original(uid), now)
-	msg.Ctrl.Params = map[string]interface{}{"unsub": unsub}
+	msg.Ctrl.Params = map[string]any{"unsub": unsub}
 	msg.SkipSid = skip
 	msg.uid = uid
 	msg.AsUser = uid.UserId()
@@ -3595,12 +3608,12 @@ func (t *Topic) p2pOtherUser(uid types.Uid) types.Uid {
 }
 
 // Get per-session value of fnd.Public
-func (t *Topic) fndGetPublic(sess *Session) interface{} {
+func (t *Topic) fndGetPublic(sess *Session) any {
 	if t.cat == types.TopicCatFnd {
 		if t.public == nil {
 			return nil
 		}
-		if pubmap, ok := t.public.(map[string]interface{}); ok {
+		if pubmap, ok := t.public.(map[string]any); ok {
 			return pubmap[sess.sid]
 		}
 		panic("Invalid Fnd.Public type")
@@ -3609,21 +3622,21 @@ func (t *Topic) fndGetPublic(sess *Session) interface{} {
 }
 
 // Assign per-session fnd.Public. Returns true if value has been changed.
-func (t *Topic) fndSetPublic(sess *Session, public interface{}) bool {
+func (t *Topic) fndSetPublic(sess *Session, public any) bool {
 	if t.cat != types.TopicCatFnd {
 		panic("Not Fnd topic")
 	}
 
-	var pubmap map[string]interface{}
+	var pubmap map[string]any
 	var ok bool
 	if t.public != nil {
-		if pubmap, ok = t.public.(map[string]interface{}); !ok {
+		if pubmap, ok = t.public.(map[string]any); !ok {
 			// This could only happen if fnd.public is assigned outside of this function.
 			panic("Invalid Fnd.Public type")
 		}
 	}
 	if pubmap == nil {
-		pubmap = make(map[string]interface{})
+		pubmap = make(map[string]any)
 	}
 
 	if public != nil {
@@ -3646,7 +3659,7 @@ func (t *Topic) fndRemovePublic(sess *Session) {
 	}
 	// FIXME: case of a multiplexing session won't work correctly.
 	// Maybe handle it at the proxy topic.
-	if pubmap, ok := t.public.(map[string]interface{}); ok {
+	if pubmap, ok := t.public.(map[string]any); ok {
 		delete(pubmap, sess.sid)
 		return
 	}

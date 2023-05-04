@@ -43,7 +43,7 @@ const (
 	defaultDSN      = "root:@tcp(localhost:3306)/tinode?parseTime=true"
 	defaultDatabase = "tinode"
 
-	adpVersion = 112
+	adpVersion = 113
 
 	adapterName = "mysql"
 
@@ -328,7 +328,8 @@ func (a *adapter) CreateDb(reset bool) error {
 			trusted   JSON,
 			tags      JSON,
 			PRIMARY KEY(id),
-			INDEX users_state_stateat(state, stateat)
+			INDEX users_state_stateat(state, stateat),
+			INDEX users_lastseen_updatedat(lastseen, updatedat)
 		)`); err != nil {
 		return err
 	}
@@ -549,13 +550,15 @@ func (a *adapter) CreateDb(reset bool) error {
 
 	if _, err = tx.Exec(
 		`CREATE TABLE kvmeta(` +
-			"`key`   CHAR(32)," +
-			"`value` TEXT," +
-			"PRIMARY KEY(`key`)" +
+			"`key`       VARCHAR(64) NOT NULL," +
+			"createdat   DATETIME(3)," +
+			"`value`     TEXT," +
+			"PRIMARY KEY(`key`)," +
+			"INDEX kvmeta_createdat_key(createdat, `key`)" +
 			`)`); err != nil {
 		return err
 	}
-	if _, err = tx.Exec("INSERT INTO kvmeta(`key`, `value`) VALUES('version', ?)", adpVersion); err != nil {
+	if _, err = tx.Exec("INSERT INTO kvmeta(`key`, `value`) VALUES('version',?)", adpVersion); err != nil {
 		return err
 	}
 
@@ -733,6 +736,34 @@ func (a *adapter) UpgradeDb() error {
 		}
 
 		if err := bumpVersion(a, 112); err != nil {
+			return err
+		}
+	}
+
+	if a.version == 112 {
+		// Perform database upgrade from version 112 to version 113.
+
+		// Index for deleting unvalidated accounts.
+		if _, err := a.db.Exec("ALTER TABLE users ADD INDEX users_lastseen_updatedat(lastseen,updatedat)"); err != nil {
+			return err
+		}
+
+		// Add timestamp to kvmeta.
+		if _, err := a.db.Exec("ALTER TABLE kvmeta MODIFY `key` VARCHAR(64) NOT NULL"); err != nil {
+			return err
+		}
+
+		// Add timestamp to kvmeta.
+		if _, err := a.db.Exec("ALTER TABLE kvmeta ADD createdat DATETIME(3) AFTER `key`"); err != nil {
+			return err
+		}
+
+		// Add compound index on the new field and key (could be searched by key prefix).
+		if _, err := a.db.Exec("ALTER TABLE kvmeta ADD INDEX kvmeta_createdat_key(createdat, `key`)"); err != nil {
+			return err
+		}
+
+		if err := bumpVersion(a, 113); err != nil {
 			return err
 		}
 	}
@@ -2310,10 +2341,14 @@ func (a *adapter) SubsDelForUser(user t.Uid, hard bool) error {
 
 // Returns a list of users who match given tags, such as "email:jdoe@example.com" or "tel:+18003287448".
 // Searching the 'users.Tags' for the given tags using respective index.
-func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string) ([]t.Subscription, error) {
+func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string, activeOnly bool) ([]t.Subscription, error) {
 	index := make(map[string]struct{})
 	var args []interface{}
-	args = append(args, t.StateOK)
+	stateConstraint := ""
+	if activeOnly {
+		args = append(args, t.StateOK)
+		stateConstraint = "u.state=? AND "
+	}
 	allReq := t.FlattenDoubleSlice(req)
 	for _, tag := range append(allReq, opt...) {
 		args = append(args, tag)
@@ -2322,7 +2357,7 @@ func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string) ([]t.Subscr
 
 	query := "SELECT u.id,u.createdat,u.updatedat,u.access,u.public,u.trusted,u.tags,COUNT(*) AS matches " +
 		"FROM users AS u LEFT JOIN usertags AS t ON t.userid=u.id " +
-		"WHERE u.state=? AND t.tag IN (?" + strings.Repeat(",?", len(allReq)+len(opt)-1) + ") " +
+		"WHERE " + stateConstraint + "t.tag IN (?" + strings.Repeat(",?", len(allReq)+len(opt)-1) + ") " +
 		"GROUP BY u.id,u.createdat,u.updatedat,u.access,u.public,u.trusted,u.tags "
 	if len(allReq) > 0 {
 		query += "HAVING"
@@ -2398,10 +2433,14 @@ func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string) ([]t.Subscr
 
 // Returns a list of topics with matching tags.
 // Searching the 'topics.Tags' for the given tags using respective index.
-func (a *adapter) FindTopics(req [][]string, opt []string) ([]t.Subscription, error) {
+func (a *adapter) FindTopics(req [][]string, opt []string, activeOnly bool) ([]t.Subscription, error) {
 	index := make(map[string]struct{})
 	var args []interface{}
-	args = append(args, t.StateOK)
+	stateConstraint := ""
+	if activeOnly {
+		args = append(args, t.StateOK)
+		stateConstraint = "t.state=? AND "
+	}
 	var allReq []string
 	for _, el := range req {
 		allReq = append(allReq, el...)
@@ -2413,7 +2452,7 @@ func (a *adapter) FindTopics(req [][]string, opt []string) ([]t.Subscription, er
 
 	query := "SELECT t.name AS topic,t.createdat,t.updatedat,t.usebt,t.access,t.public,t.trusted,t.tags,COUNT(*) AS matches " +
 		"FROM topics AS t LEFT JOIN topictags AS tt ON t.name=tt.topic " +
-		"WHERE t.state=? AND tt.tag IN (?" + strings.Repeat(",?", len(allReq)+len(opt)-1) + ") " +
+		"WHERE " + stateConstraint + "tt.tag IN (?" + strings.Repeat(",?", len(allReq)+len(opt)-1) + ") " +
 		"GROUP BY t.name,t.createdat,t.updatedat,t.usebt,t.access,t.public,t.trusted,t.tags "
 	if len(allReq) > 0 {
 		query += "HAVING"
@@ -2623,7 +2662,7 @@ func (a *adapter) MessageGetDeleted(topic string, forUser t.Uid, opts *t.QueryOp
 		if dellog.Hi <= dellog.Low+1 {
 			dellog.Hi = 0
 		}
-		dmsg.SeqIdRanges = append(dmsg.SeqIdRanges, t.Range{dellog.Low, dellog.Hi})
+		dmsg.SeqIdRanges = append(dmsg.SeqIdRanges, t.Range{Low: dellog.Low, Hi: dellog.Hi})
 	}
 	if err == nil {
 		err = rows.Err()
@@ -3346,6 +3385,75 @@ func (a *adapter) FileLinkAttachments(topic string, userId, msgId t.Uid, fids []
 	}
 
 	return tx.Commit()
+}
+
+// PCacheGet reads a persistet cache entry.
+func (a *adapter) PCacheGet(key string) (string, error) {
+	ctx, cancel := a.getContext()
+	if cancel != nil {
+		defer cancel()
+	}
+
+	var value string
+	if err := a.db.GetContext(ctx, &value, "SELECT `value` FROM kvmeta WHERE `key`=? LIMIT 1", key); err != nil {
+		if err == sql.ErrNoRows {
+			return "", t.ErrNotFound
+		}
+		return "", err
+	}
+	return value, nil
+}
+
+// PCacheUpsert creates or updates a persistent cache entry.
+func (a *adapter) PCacheUpsert(key string, value string, failOnDuplicate bool) error {
+	if strings.Contains(key, "%") {
+		// Do not allow % in keys: it interferes with LIKE query.
+		return t.ErrMalformed
+	}
+
+	ctx, cancel := a.getContext()
+	if cancel != nil {
+		defer cancel()
+	}
+
+	var action string
+	if failOnDuplicate {
+		action = "INSERT"
+	} else {
+		action = "REPLACE"
+	}
+
+	_, err := a.db.ExecContext(ctx, action+" INTO kvmeta(`key`,createdat,`value`) VALUES(?,?,?)", key, t.TimeNow(), value)
+	if isDupe(err) {
+		return t.ErrDuplicate
+	}
+	return err
+}
+
+// PCacheDelete deletes one persistent cache entry.
+func (a *adapter) PCacheDelete(key string) error {
+	ctx, cancel := a.getContext()
+	if cancel != nil {
+		defer cancel()
+	}
+
+	_, err := a.db.ExecContext(ctx, "DELETE FROM kvmeta WHERE `key`=?")
+	return err
+}
+
+// PCacheExpire expires old entries with the given key prefix.
+func (a *adapter) PCacheExpire(keyPrefix string, olderThan time.Time) error {
+	if keyPrefix == "" {
+		return t.ErrMalformed
+	}
+
+	ctx, cancel := a.getContext()
+	if cancel != nil {
+		defer cancel()
+	}
+
+	_, err := a.db.ExecContext(ctx, "DELETE FROM kvmeta WHERE `key` LIKE ? AND createdat<?", keyPrefix+"%", olderThan)
+	return err
 }
 
 // Helper functions

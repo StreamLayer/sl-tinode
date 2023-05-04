@@ -16,6 +16,7 @@ import (
 	"github.com/tinode/chat/server/auth"
 	_ "github.com/tinode/chat/server/db/mongodb"
 	_ "github.com/tinode/chat/server/db/mysql"
+	_ "github.com/tinode/chat/server/db/postgres"
 	_ "github.com/tinode/chat/server/db/rethinkdb"
 	"github.com/tinode/chat/server/store"
 	"github.com/tinode/chat/server/store/types"
@@ -241,8 +242,13 @@ func main() {
 	defer store.Store.Close()
 
 	adapterVersion := store.Store.GetAdapterVersion()
-	databaseVersion := store.Store.GetDbVersion()
+	databaseVersion := 0
+	if store.Store.IsOpen() {
+		databaseVersion = store.Store.GetDbVersion()
+	}
 	log.Printf("Database adapter: '%s'; version: %d", store.Store.GetAdapterName(), adapterVersion)
+
+	var created bool
 
 	if err != nil {
 		if strings.Contains(err.Error(), "Database not initialized") {
@@ -250,16 +256,29 @@ func main() {
 				log.Fatalln("Database not found.")
 			}
 			log.Println("Database not found. Creating.")
+			err = store.Store.InitDb(config.StoreConfig, false)
+			if err == nil {
+				log.Println("Database successfully created.")
+				created = true
+			}
 		} else if strings.Contains(err.Error(), "Invalid database version") {
 			msg := "Wrong DB version: expected " + strconv.Itoa(adapterVersion) + ", got " +
 				strconv.Itoa(databaseVersion) + "."
 			if *reset {
-				log.Println(msg, "Dropping and recreating the database.")
+				log.Println(msg, "Reset Requested. Dropping and recreating the database.")
+				err = store.Store.InitDb(config.StoreConfig, true)
+				if err == nil {
+					log.Println("Database successfully reset.")
+				}
 			} else if *upgrade {
 				if databaseVersion > adapterVersion {
 					log.Fatalln(msg, "Unable to upgrade: database has greater version than the adapter.")
 				}
 				log.Println(msg, "Upgrading the database.")
+				err = store.Store.UpgradeDb(config.StoreConfig)
+				if err == nil {
+					log.Println("Database successfully upgraded.")
+				}
 			} else {
 				log.Fatalln(msg, "Use --reset to reset, --upgrade to upgrade.")
 			}
@@ -267,37 +286,20 @@ func main() {
 			log.Fatalln("Failed to init DB adapter:", err)
 		}
 	} else if *reset {
-		log.Println("Database reset requested")
-	} else {
-		log.Println("Database exists, DB version is correct. All done.")
-		os.Exit(0)
-	}
-
-	if *upgrade {
-		// Upgrade DB from one version to another.
-		err = store.Store.UpgradeDb(config.StoreConfig)
-		if err == nil {
-			log.Println("Database successfully upgraded.")
-		}
-	} else {
-		// Reset or create DB
+		log.Println("Reset requested. Dropping and recreating the database.")
 		err = store.Store.InitDb(config.StoreConfig, true)
 		if err == nil {
-			var action string
-			if *reset {
-				action = "reset"
-			} else {
-				action = "initialized"
-			}
-			log.Println("Database", action)
+			log.Println("Database successfully reset.")
 		}
+	} else {
+		log.Println("Database exists, version is correct.")
 	}
 
 	if err != nil {
-		log.Fatalln("Failed to init DB:", err)
+		log.Fatalln("Failure:", err)
 	}
 
-	if !*upgrade {
+	if *reset || created {
 		genDb(&data)
 	} else if len(data.Users) > 0 {
 		log.Println("Sample data ignored.")

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -10,8 +11,8 @@ import (
 	"github.com/tinode/chat/pbx"
 	"github.com/tinode/chat/server/logs"
 	"github.com/tinode/chat/server/store/types"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -246,7 +247,7 @@ type Plugin struct {
 
 func pluginsInit(configString json.RawMessage) {
 	// Check if any plugins are defined
-	if configString == nil || len(configString) == 0 {
+	if len(configString) == 0 {
 		return
 	}
 
@@ -286,7 +287,7 @@ func pluginsInit(configString json.RawMessage) {
 		}
 		if globals.plugins[count].filterTopic, err =
 			ParsePluginFilter(conf.Filters.Topic, plgFilterByTopicType|plgFilterByAction); err != nil {
-			logs.Err.Fatal("plugins: bad FireHose filter", err)
+			logs.Err.Fatal("plugins: bad Topic filter", err)
 		}
 		if globals.plugins[count].filterSubscription, err =
 			ParsePluginFilter(conf.Filters.Subscription, plgFilterByTopicType|plgFilterByAction); err != nil {
@@ -306,7 +307,7 @@ func pluginsInit(configString json.RawMessage) {
 			globals.plugins[count].addr = parts[1]
 		}
 
-		globals.plugins[count].conn, err = grpc.Dial(globals.plugins[count].addr, grpc.WithInsecure())
+		globals.plugins[count].conn, err = grpc.Dial(globals.plugins[count].addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			logs.Err.Fatalf("plugins: connection failure %v", err)
 		}

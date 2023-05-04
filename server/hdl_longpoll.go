@@ -12,14 +12,14 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/tinode/chat/server/logs"
 )
 
-func (sess *Session) sendMessageLp(wrt http.ResponseWriter, msg interface{}) bool {
+func (sess *Session) sendMessageLp(wrt http.ResponseWriter, msg any) bool {
 	if len(sess.send) > sendQueueLimit {
 		logs.Err.Println("longPoll: outbound queue limit exceeded", sess.sid)
 		return false
@@ -88,7 +88,7 @@ func (sess *Session) writeOnce(wrt http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func lpWrite(wrt http.ResponseWriter, msg interface{}) error {
+func lpWrite(wrt http.ResponseWriter, msg any) error {
 	// This will panic if msg is not []byte. This is intentional.
 	wrt.Write(msg.([]byte))
 	return nil
@@ -100,7 +100,7 @@ func (sess *Session) readOnce(wrt http.ResponseWriter, req *http.Request) (int, 
 	}
 
 	req.Body = http.MaxBytesReader(wrt, req.Body, globals.maxMessageSize)
-	raw, err := ioutil.ReadAll(req.Body)
+	raw, err := io.ReadAll(req.Body)
 	if err == nil {
 		// Locking-unlocking is needed because the client may issue multiple requests in parallel.
 		// Should not affect performance

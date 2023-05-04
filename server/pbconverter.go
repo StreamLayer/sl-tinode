@@ -14,7 +14,7 @@ import (
 func pbServCtrlSerialize(ctrl *MsgServerCtrl) *pbx.ServerMsg_Ctrl {
 	var params map[string][]byte
 	if ctrl.Params != nil {
-		if in, ok := ctrl.Params.(map[string]interface{}); ok {
+		if in, ok := ctrl.Params.(map[string]any); ok {
 			params = interfaceMapToByteMap(in)
 		}
 	}
@@ -247,18 +247,32 @@ func pbCliSerialize(msg *ClientComMessage) *pbx.ClientMsg {
 			},
 		}
 	case msg.Acc != nil:
+		var authLevel pbx.AuthLevel
+		switch msg.Acc.AuthLevel {
+		case "NONE", "none", "":
+			authLevel = pbx.AuthLevel_NONE
+		case "ANON", "anon":
+			authLevel = pbx.AuthLevel_ANON
+		case "AUTH", "auth":
+			authLevel = pbx.AuthLevel_AUTH
+		case "ROOT", "root":
+			// No support for ROOT here.
+			authLevel = pbx.AuthLevel_NONE
+		}
 		pkt.Message = &pbx.ClientMsg_Acc{
 			Acc: &pbx.ClientAcc{
-				Id:     msg.Acc.Id,
-				UserId: msg.Acc.User,
-				State:  msg.Acc.State,
-				Token:  msg.Acc.Token,
-				Scheme: msg.Acc.Scheme,
-				Secret: msg.Acc.Secret,
-				Login:  msg.Acc.Login,
-				Tags:   msg.Acc.Tags,
-				Cred:   pbClientCredsSerialize(msg.Acc.Cred),
-				Desc:   pbSetDescSerialize(msg.Acc.Desc),
+				Id:        msg.Acc.Id,
+				UserId:    msg.Acc.User,
+				State:     msg.Acc.State,
+				TmpScheme: msg.Acc.TmpScheme,
+				TmpSecret: msg.Acc.TmpSecret,
+				AuthLevel: authLevel,
+				Scheme:    msg.Acc.Scheme,
+				Secret:    msg.Acc.Secret,
+				Login:     msg.Acc.Login,
+				Tags:      msg.Acc.Tags,
+				Cred:      pbClientCredsSerialize(msg.Acc.Cred),
+				Desc:      pbSetDescSerialize(msg.Acc.Desc),
 			},
 		}
 	case msg.Login != nil:
@@ -380,15 +394,18 @@ func pbCliDeserialize(pkt *pbx.ClientMsg) *ClientComMessage {
 		}
 	} else if acc := pkt.GetAcc(); acc != nil {
 		msg.Acc = &MsgClientAcc{
-			Id:     acc.GetId(),
-			User:   acc.GetUserId(),
-			State:  acc.GetState(),
-			Scheme: acc.GetScheme(),
-			Secret: acc.GetSecret(),
-			Login:  acc.GetLogin(),
-			Tags:   acc.GetTags(),
-			Desc:   pbSetDescDeserialize(acc.GetDesc()),
-			Cred:   pbClientCredsDeserialize(acc.GetCred()),
+			Id:        acc.GetId(),
+			User:      acc.GetUserId(),
+			State:     acc.GetState(),
+			TmpScheme: acc.GetTmpScheme(),
+			TmpSecret: acc.GetTmpSecret(),
+			AuthLevel: acc.GetAuthLevel().String(),
+			Scheme:    acc.GetScheme(),
+			Secret:    acc.GetSecret(),
+			Login:     acc.GetLogin(),
+			Tags:      acc.GetTags(),
+			Desc:      pbSetDescDeserialize(acc.GetDesc()),
+			Cred:      pbClientCredsDeserialize(acc.GetCred()),
 		}
 	} else if login := pkt.GetLogin(); login != nil {
 		msg.Login = &MsgClientLogin{
@@ -479,7 +496,7 @@ func pbCliDeserialize(pkt *pbx.ClientMsg) *ClientComMessage {
 	return &msg
 }
 
-func interfaceMapToByteMap(in map[string]interface{}) map[string][]byte {
+func interfaceMapToByteMap(in map[string]any) map[string][]byte {
 	out := make(map[string][]byte, len(in))
 	for key, val := range in {
 		if val != nil {
@@ -489,8 +506,8 @@ func interfaceMapToByteMap(in map[string]interface{}) map[string][]byte {
 	return out
 }
 
-func byteMapToInterfaceMap(in map[string][]byte) map[string]interface{} {
-	out := make(map[string]interface{}, len(in))
+func byteMapToInterfaceMap(in map[string][]byte) map[string]any {
+	out := make(map[string]any, len(in))
 	for key, raw := range in {
 		if val := bytesToInterface(raw); val != nil {
 			out[key] = val
@@ -499,7 +516,7 @@ func byteMapToInterfaceMap(in map[string][]byte) map[string]interface{} {
 	return out
 }
 
-func interfaceToBytes(in interface{}) []byte {
+func interfaceToBytes(in any) []byte {
 	if in != nil {
 		out, _ := json.Marshal(in)
 		return out
@@ -507,8 +524,8 @@ func interfaceToBytes(in interface{}) []byte {
 	return nil
 }
 
-func bytesToInterface(in []byte) interface{} {
-	var out interface{}
+func bytesToInterface(in []byte) any {
+	var out any
 	if len(in) > 0 {
 		err := json.Unmarshal(in, &out)
 		if err != nil {
@@ -861,6 +878,7 @@ func pbTopicDescSerialize(desc *MsgTopicDesc) *pbx.TopicDesc {
 		UpdatedAt: timeToInt64(desc.UpdatedAt),
 		TouchedAt: timeToInt64(desc.TouchedAt),
 		State:     desc.State,
+		Online:    desc.Online,
 		IsChan:    desc.IsChan,
 		Defacs:    pbDefaultAcsSerialize(desc.DefaultAcs),
 		Acs:       pbAccessModeSerialize(desc.Acs),
@@ -888,6 +906,7 @@ func pbTopicDescDeserialize(desc *pbx.TopicDesc) *MsgTopicDesc {
 		UpdatedAt:  int64ToTime(desc.GetUpdatedAt()),
 		TouchedAt:  int64ToTime(desc.GetTouchedAt()),
 		State:      desc.GetState(),
+		Online:     desc.GetOnline(),
 		IsChan:     desc.GetIsChan(),
 		DefaultAcs: pbDefaultAcsDeserialize(desc.GetDefacs()),
 		Acs:        pbAccessModeDeserialize(desc.GetAcs()),

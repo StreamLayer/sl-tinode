@@ -30,12 +30,14 @@ import (
 	"github.com/tinode/chat/server/auth"
 	_ "github.com/tinode/chat/server/auth/anon"
 	_ "github.com/tinode/chat/server/auth/basic"
+	_ "github.com/tinode/chat/server/auth/code"
 	_ "github.com/tinode/chat/server/auth/rest"
 	_ "github.com/tinode/chat/server/auth/token"
 
 	// Database backends
 	_ "github.com/tinode/chat/server/db/mongodb"
 	_ "github.com/tinode/chat/server/db/mysql"
+	_ "github.com/tinode/chat/server/db/postgres"
 	_ "github.com/tinode/chat/server/db/rethinkdb"
 
 	"github.com/tinode/chat/server/logs"
@@ -61,9 +63,9 @@ import (
 
 const (
 	// currentVersion is the current API/protocol version
-	currentVersion = "0.21"
+	currentVersion = "0.22"
 	// minSupportedVersion is the minimum supported API version
-	minSupportedVersion = "0.18"
+	minSupportedVersion = "0.19"
 
 	// idleSessionTimeout defines duration of being idle before terminating a session.
 	idleSessionTimeout = time.Second * 55
@@ -176,6 +178,8 @@ var globals struct {
 	maxSubscriberCount int
 	// Maximum number of indexable tags.
 	maxTagCount int
+	// If true, ordinary users cannot delete their accounts.
+	permanentAccounts bool
 
 	// Maximum allowed upload size.
 	maxFileUploadSize int64
@@ -193,6 +197,13 @@ var globals struct {
 
 	// ICE servers config (video calling)
 	iceServers []iceServer
+
+	// Websocket per-message compression negotiation is enabled.
+	wsCompression bool
+
+	// URL of the main endpoint.
+	// TODO: implement file-serving API for gRPC and remove this feature.
+	servingAt string
 }
 
 // Credential validator config.
@@ -243,6 +254,9 @@ type configType struct {
 	ApiPath string `json:"api_path"`
 	// Cache-Control value for static content.
 	CacheControl int `json:"cache_control"`
+	// If true, do not attempt to negotiate websocket per message compression (RFC 7692.4).
+	// It should be disabled (set to true) if you are using MSFT IIS as a reverse proxy.
+	WSCompressionDisabled bool `json:"ws_compression_disabled"`
 	// Address:port to listen for gRPC clients. If blank gRPC support will not be initialized.
 	// Could be overridden from the command line with --grpc_listen.
 	GrpcListen string `json:"grpc_listen"`
@@ -262,8 +276,10 @@ type configType struct {
 	MaxSubscriberCount int `json:"max_subscriber_count"`
 	// Masked tags: tags immutable on User (mask), mutable on Topic only within the mask.
 	MaskedTagNamespaces []string `json:"masked_tags"`
-	// Maximum number of indexable tags
+	// Maximum number of indexable tags.
 	MaxTagCount int `json:"max_tag_count"`
+	// If true, ordinary users cannot delete their accounts.
+	PermanentAccounts bool `json:"permanent_accounts"`
 	// URL path for exposing runtime stats. Disabled if the path is blank.
 	ExpvarPath string `json:"expvar"`
 	// URL path for internal server status. Disabled if the path is blank.
@@ -462,22 +478,13 @@ func main() {
 		for _, req := range vconf.Required {
 			lvl := auth.ParseAuthLevel(req)
 			if lvl == auth.LevelNone {
-				if req != "" {
-					logs.Err.Fatalf("Invalid required AuthLevel '%s' in validator '%s'", req, name)
-				}
-				// Skip empty string
-				continue
+				logs.Err.Fatalf("Invalid required AuthLevel '%s' in validator '%s'", req, name)
 			}
 			reqLevels = append(reqLevels, lvl)
 			if globals.authValidators == nil {
 				globals.authValidators = make(map[auth.Level][]string)
 			}
 			globals.authValidators[lvl] = append(globals.authValidators[lvl], name)
-		}
-
-		if len(reqLevels) == 0 {
-			// Ignore validator with empty levels.
-			continue
 		}
 
 		if val := store.Store.GetValidator(name); val == nil {
@@ -541,12 +548,17 @@ func main() {
 	if globals.maxTagCount <= 0 {
 		globals.maxTagCount = defaultMaxTagCount
 	}
+	// If account deletion is disabled.
+	globals.permanentAccounts = config.PermanentAccounts
 
 	globals.useXForwardedFor = config.UseXForwardedFor
 	globals.defaultCountryCode = config.DefaultCountryCode
 	if globals.defaultCountryCode == "" {
 		globals.defaultCountryCode = defaultCountryCode
 	}
+
+	// Websocket compression.
+	globals.wsCompression = !config.WSCompressionDisabled
 
 	if config.Media != nil {
 		if config.Media.UseHandler == "" {
@@ -686,6 +698,16 @@ func main() {
 		}
 	}
 	logs.Info.Printf("API served from root URL path '%s'", config.ApiPath)
+
+	// Best guess location of the main endpoint.
+	// TODO: provide fix for the case when the serving is over unix sockets.
+	// TODO: implement serving large files over gRPC, then remove globals.servingAt.
+	globals.servingAt = config.Listen + config.ApiPath
+	if tlsConfig != nil {
+		globals.servingAt = "https://" + globals.servingAt
+	} else {
+		globals.servingAt = "http://" + globals.servingAt
+	}
 
 	sspath := *serverStatusPath
 	if sspath == "" || sspath == "-" {

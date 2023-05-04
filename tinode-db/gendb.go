@@ -327,7 +327,7 @@ func genDb(data *Data) {
 				if timestamp.After(now) {
 					now = timestamp
 				}
-				if err = store.Messages.Save(&types.Message{
+				if err, _ = store.Messages.Save(&types.Message{
 					ObjHeader: types.ObjHeader{CreatedAt: timestamp},
 					SeqId:     seqId,
 					Topic:     topic,
@@ -349,7 +349,7 @@ func genDb(data *Data) {
 
 			for _, gt := range data.Grouptopics {
 				seqIds[nameIndex[gt.Name]] = 1
-				if err = store.Messages.Save(&types.Message{
+				if err, _ = store.Messages.Save(&types.Message{
 					ObjHeader: types.ObjHeader{CreatedAt: now},
 					SeqId:     1,
 					Topic:     nameIndex[gt.Name],
@@ -368,7 +368,7 @@ func genDb(data *Data) {
 				}
 				usedp2p[nameIndex[sub.pair]] = true
 				seqIds[nameIndex[sub.pair]] = 1
-				if err = store.Messages.Save(&types.Message{
+				if err, _ = store.Messages.Save(&types.Message{
 					ObjHeader: types.ObjHeader{CreatedAt: now},
 					SeqId:     1,
 					Topic:     nameIndex[sub.pair],
@@ -391,7 +391,7 @@ func genDb(data *Data) {
 				seqIds[nameIndex[sub.pair]]++
 				seqId := seqIds[nameIndex[sub.pair]]
 				if sub.Users[0].Name == botAccount || sub.Users[1].Name == botAccount {
-					if err = store.Messages.Save(&types.Message{
+					if err, _ = store.Messages.Save(&types.Message{
 						ObjHeader: types.ObjHeader{CreatedAt: ts},
 						SeqId:     seqId,
 						Topic:     nameIndex[sub.pair],
@@ -406,7 +406,7 @@ func genDb(data *Data) {
 		}
 	}
 
-	log.Println("All done.")
+	log.Println("Sample data processing completed.")
 }
 
 // Go json cannot unmarshal Duration from a string, thus this hack.

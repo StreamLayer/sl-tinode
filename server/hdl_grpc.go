@@ -76,7 +76,7 @@ func (*grpcNodeServer) MessageLoop(stream pbx.Node_MessageLoopServer) error {
 	return nil
 }
 
-func (sess *Session) sendMessageGrpc(msg interface{}) bool {
+func (sess *Session) sendMessageGrpc(msg any) bool {
 	if len(sess.send) > sendQueueLimit {
 		logs.Err.Println("grpc: outbound queue limit exceeded", sess.sid)
 		return false
@@ -139,7 +139,7 @@ func (sess *Session) writeGrpcLoop() {
 	}
 }
 
-func grpcWrite(sess *Session, msg interface{}) error {
+func grpcWrite(sess *Session, msg any) error {
 	if out := sess.grpcnode; out != nil {
 		// handle panic runtime error: invalid memory address or nil pointer dereference
 		defer func() {
@@ -170,10 +170,6 @@ func serveGrpc(addr string, kaEnabled bool, tlsConf *tls.Config) (*grpc.Server, 
 	secure := ""
 	var opts []grpc.ServerOption
 	opts = append(opts, grpc.MaxRecvMsgSize(int(globals.maxMessageSize)))
-	if tlsConf != nil {
-		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConf)))
-		secure = " secure"
-	}
 
 	if kaEnabled {
 		logs.Info.Printf("gRPC server kaEnabled")
@@ -190,6 +186,11 @@ func serveGrpc(addr string, kaEnabled bool, tlsConf *tls.Config) (*grpc.Server, 
 			MaxConnectionIdle: 10 * time.Second,
 		}
 		opts = append(opts, grpc.KeepaliveParams(kpConfig))
+	}
+
+	if tlsConf != nil {
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConf)))
+		secure = " secure"
 	}
 
 	srv := grpc.NewServer(opts...)

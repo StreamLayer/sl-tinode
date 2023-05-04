@@ -628,7 +628,7 @@ Every client to server message contains the main payload described in the sectio
 }
 ```
 The `attachments` array lists URLs of files uploaded out of band. Such listing increments use counter of these files. Once the use counter drops to 0, the files will be automatically deleted.
-The `obo` can be set by the `root` user. If the `obo` is set, the server will treat the message as if it came from the sepcified user as opposite to the actual sender.
+The `obo` (On Behalf Of) can be set by the `root` user. If the `obo` is set, the server will treat the message as if it came from the specified user as opposite to the actual sender.
 The `authlevel` is supplementary to the `obo` and permits setting custom authentication level for the user. A an `"auth"` level is used if the field is unset.
 
 #### `{hi}`
@@ -668,7 +668,12 @@ acc: {
               // default: current user, optional
   token: "XMgS...8+BO0=", // string, authentication token to use for the request if the
                // session is not authenticated, optional
+  // Temporary authentication parameters for one-off actions, like password reset.
+  tmpscheme: "code", // name of the temp wuth scheme
+  tmpsecret: "XMgS...8+BO0=", // temp auth secret
   status: "ok", // change user's status; no default value, optional.
+  authlevel: "auth", // authentication level of the user when UserID is set and not equal
+              // to the current user; Either "", "auth" or "anon"; default: ""
   scheme: "basic", // authentication scheme for this account, required;
                // "basic" and "anon" are currently supported for account creation.
   secret: base64encode("username:password"), // string, base64 encoded secret for the chosen
@@ -876,10 +881,8 @@ The following values are currently defined for the `head` field:
  * `attachments`: an array of paths indicating media attached to this message `["/v0/file/s/sJOD_tZDPz0.jpg"]`.
  * `auto`: `true` when the message was sent automatically, i.e. by a chatbot or an auto-responder.
  * `forwarded`: an indicator that the message is a forwarded message, a unique ID of the original message, `"grp1XUtEhjv6HND:123"`.
- * `hashtags`: an array of hashtags in the message without the leading `#` symbol: `["onehash", "twohash"]`.
  * `mentions`: an array of user IDs mentioned (`@alice`) in the message: `["usr1XUtEhjv6HND", "usr2il9suCbuko"]`.
  * `mime`: MIME-type of the message content, `"text/x-drafty"`; a `null` or a missing value is interpreted as `"text/plain"`.
- * `priority`: message display priority: hint for the client that the message should be displayed more prominently for a set period of time; only `"high"` is currently defined; `{"level": "high", "expires": "2019-10-06T18:07:30.038Z"}`; `priority` can be set by the topic owner or administrator (`A` permission) only. The `"expires"` qualifier is optional.
  * `replace`: an indicator that the message is a correction/replacement for another message, a topic-unique ID of the message being updated/replaced, `":123"`
  * `reply`: an indicator that the message is a reply to another message, a unique ID of the original message, `"grp1XUtEhjv6HND:123"`.
  * `sender`: a user ID of the sender added by the server when the message is sent on behalf of another user, `"usr1XUtEhjv6HND"`.
@@ -888,8 +891,9 @@ The following values are currently defined for the `head` field:
    * `"started"`: call has been initiated and being established
    * `"accepted"`: call has been accepted and established
    * `"finished"`: previously successfully established call has been ended
-   * `"missed"`: call was hung up by the caller or timed out before getting established
+   * `"missed"`: call timed out before getting established
    * `"declined"`: call was hung up by the callee before getting established
+   * `"busy"`: the call was declined due to the callee being in another call.
    * `"disconnected"`: call was terminated by the server for other reasons (e.g. due to an error)
  * `webrtc-duration`: a number representing a video call duration (in milliseconds).
 
