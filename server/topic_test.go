@@ -17,7 +17,7 @@ import (
 )
 
 type responses struct {
-	messages []interface{}
+	messages []any
 }
 
 // Test fixture.
@@ -70,7 +70,7 @@ func (b *TopicTestHelper) newSession(sid string, uid types.Uid) (*Session, *resp
 		sid:    sid,
 		uid:    uid,
 		subs:   make(map[string]*Subscription),
-		send:   make(chan interface{}, 10),
+		send:   make(chan any, 10),
 		detach: make(chan string, 10),
 	}
 	r := &responses{}
@@ -190,7 +190,7 @@ func TestHandleBroadcastDataP2P(t *testing.T) {
 	helper := TopicTestHelper{}
 	helper.setUp(t, numUsers, types.TopicCatP2P, "p2p-test" /*attach=*/, true)
 	defer helper.tearDown()
-	helper.mm.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	helper.mm.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, true)
 
 	from := helper.uids[0].UserId()
 	msg := &ClientComMessage{
@@ -270,7 +270,7 @@ func TestHandleBroadcastCall(t *testing.T) {
 	globals.iceServers = []iceServer{{Username: "dummy"}}
 	helper.topic.lastID = 5
 	defer helper.tearDown()
-	helper.mm.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	helper.mm.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, true)
 
 	from := helper.uids[0].UserId()
 	msg := &ClientComMessage{
@@ -278,7 +278,7 @@ func TestHandleBroadcastCall(t *testing.T) {
 		Original: from,
 		Pub: &MsgClientPub{
 			Topic:   "p2p",
-			Head:    map[string]interface{}{"webrtc": "started"},
+			Head:    map[string]any{"webrtc": "started"},
 			Content: "test",
 			NoEcho:  true,
 		},
@@ -376,7 +376,7 @@ func TestHandleBroadcastDataGroup(t *testing.T) {
 		store.Messages = nil
 		helper.tearDown()
 	}()
-	helper.mm.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	helper.mm.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, true)
 
 	// User 3 isn't allowed to read.
 	pu3 := helper.topic.perUser[helper.uids[3]]
@@ -526,7 +526,7 @@ func TestHandleBroadcastDataDbError(t *testing.T) {
 	defer helper.tearDown()
 
 	// DB returns an error.
-	helper.mm.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(types.ErrInternal)
+	helper.mm.EXPECT().Save(gomock.Any(), gomock.Any(), gomock.Any()).Return(types.ErrInternal, false)
 
 	// Make test message.
 	from := helper.uids[0].UserId()
@@ -626,7 +626,7 @@ func TestHandleBroadcastInfoP2P(t *testing.T) {
 	from := helper.uids[0]
 	to := helper.uids[1]
 
-	helper.ss.EXPECT().Update(topicName, from, map[string]interface{}{"ReadSeqId": readId}).Return(nil)
+	helper.ss.EXPECT().Update(topicName, from, map[string]any{"ReadSeqId": readId}).Return(nil)
 
 	msg := &ClientComMessage{
 		AsUser: from.UserId(),
@@ -918,7 +918,7 @@ func TestHandleBroadcastInfoDbError(t *testing.T) {
 	from := helper.uids[0]
 	to := helper.uids[1]
 
-	helper.ss.EXPECT().Update(topicName, from, map[string]interface{}{"ReadSeqId": readId}).Return(types.ErrInternal)
+	helper.ss.EXPECT().Update(topicName, from, map[string]any{"ReadSeqId": readId}).Return(types.ErrInternal)
 
 	msg := &ClientComMessage{
 		AsUser:   from.UserId(),
@@ -1022,7 +1022,7 @@ func TestHandleBroadcastInfoChannelProcessing(t *testing.T) {
 		helper.topic.perUser[uid] = pud
 	}
 
-	helper.ss.EXPECT().Update(chanName, from, map[string]interface{}{"ReadSeqId": readId}).Return(nil)
+	helper.ss.EXPECT().Update(chanName, from, map[string]any{"ReadSeqId": readId}).Return(nil)
 
 	msg := &ClientComMessage{
 		AsUser:   from.UserId(),
@@ -2375,8 +2375,8 @@ func SupersetOf(subset map[string]string) gomock.Matcher {
 	return &supersetOf{subset}
 }
 
-func (s *supersetOf) Matches(x interface{}) bool {
-	super := x.(map[string]interface{})
+func (s *supersetOf) Matches(x any) bool {
+	super := x.(map[string]any)
 	if super == nil {
 		return false
 	}
@@ -2407,7 +2407,7 @@ func TestHandleMetaSetDescMePublicPrivate(t *testing.T) {
 	uid := helper.uids[0]
 	gomock.InOrder(
 		helper.uu.EXPECT().Update(uid, SupersetOf(map[string]string{"Public": "new public"})).Return(nil),
-		helper.ss.EXPECT().Update(topicName, uid, map[string]interface{}{"Private": "new private"}).Return(nil),
+		helper.ss.EXPECT().Update(topicName, uid, map[string]any{"Private": "new private"}).Return(nil),
 	)
 
 	meta := &ClientComMessage{

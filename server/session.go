@@ -135,11 +135,11 @@ type Session struct {
 
 	// Outbound mesages, buffered.
 	// The content must be serialized in format suitable for the session.
-	send chan interface{}
+	send chan any
 
 	// Channel for shutting down the session, buffer 1.
 	// Content in the same format as for 'send'
-	stop chan interface{}
+	stop chan any
 
 	// detach - channel for detaching session from topic, buffered.
 	// Content is topic name to detach from.
@@ -394,7 +394,7 @@ func (s *Session) detachSession(fromTopic string) {
 	}
 }
 
-func (s *Session) stopSession(data interface{}) {
+func (s *Session) stopSession(data any) {
 	s.stop <- data
 	s.maybeScheduleClusterWriteLoop()
 }
@@ -589,6 +589,7 @@ func (s *Session) dispatch(msg *ClientComMessage) {
 		msg.Id = msg.Acc.Id
 
 	case msg.Note != nil:
+		// If user is not authenticated or version not set the {note} is silently ignored.
 		handler = s.note
 		msg.Original = msg.Note.Topic
 		uaRefresh = true
@@ -697,7 +698,7 @@ func (s *Session) publish(msg *ClientComMessage) {
 	// Add "sender" header if the message is sent on behalf of another user.
 	if msg.AsUser != s.uid.UserId() {
 		if msg.Pub.Head == nil {
-			msg.Pub.Head = make(map[string]interface{})
+			msg.Pub.Head = make(map[string]any)
 		}
 		msg.Pub.Head["sender"] = s.uid.UserId()
 	} else if msg.Pub.Head != nil {
@@ -735,7 +736,7 @@ func (s *Session) publish(msg *ClientComMessage) {
 
 // Client metadata
 func (s *Session) hello(msg *ClientComMessage) {
-	var params map[string]interface{}
+	var params map[string]any
 	var deviceIDUpdate bool
 
 	if s.ver == 0 {
@@ -753,7 +754,7 @@ func (s *Session) hello(msg *ClientComMessage) {
 			return
 		}
 
-		params = map[string]interface{}{
+		params = map[string]any{
 			"ver":                currentVersion,
 			"build":              store.Store.GetAdapterName() + ":" + buildstamp,
 			"maxMessageSize":     globals.maxMessageSize,
@@ -769,6 +770,18 @@ func (s *Session) hello(msg *ClientComMessage) {
 		}
 		if globals.callEstablishmentTimeout > 0 {
 			params["callTimeout"] = globals.callEstablishmentTimeout
+		}
+
+		if s.proto == GRPC {
+			// gRPC client may need server address to be able to fetch large files over http(s).
+			// TODO: add support for fetching files over gRPC, then remove this parameter.
+			params["servingAt"] = globals.servingAt
+			// Report cluster size.
+			if globals.cluster != nil {
+				params["clusterSize"] = len(globals.cluster.nodes) + 1
+			} else {
+				params["clusterSize"] = 1
+			}
 		}
 
 		// Set ua & platform in the beginning of the session.
@@ -827,11 +840,14 @@ func (s *Session) hello(msg *ClientComMessage) {
 	s.deviceID = msg.Hi.DeviceID
 	s.lang = msg.Hi.Lang
 	// Try to deduce the country from the locale.
-	if tag, err := language.Parse(s.lang); err == nil {
+	// Tag may be well-defined even if err != nil. For example, for 'zh_CN_#Hans'
+	// the tag is 'zh-CN' exact but the err is 'tag is not well-formed'.
+	if tag, _ := language.Parse(s.lang); tag != language.Und {
 		if region, conf := tag.Region(); region.IsCountry() && conf >= language.High {
 			s.countryCode = region.String()
 		}
 	}
+
 	if s.countryCode == "" {
 		if len(s.lang) > 2 {
 			// Logging strings longer than 2 b/c language.Parse(XX) always succeeds
@@ -863,26 +879,34 @@ func (s *Session) hello(msg *ClientComMessage) {
 
 // Account creation
 func (s *Session) acc(msg *ClientComMessage) {
-	// If token is provided, get the user ID from it.
+	newAcc := strings.HasPrefix(msg.Acc.User, "new")
+
+	// If temporary auth parameters are provided, get the user ID from them.
 	var rec *auth.Rec
-	if msg.Acc.Token != nil {
+	if !newAcc && msg.Acc.TmpScheme != "" {
 		if !s.uid.IsZero() {
 			s.queueOut(ErrAlreadyAuthenticated(msg.Acc.Id, "", msg.Timestamp))
 			logs.Warn.Println("s.acc: got token while already authenticated", s.sid)
 			return
 		}
 
+		authHdl := store.Store.GetLogicalAuthHandler(msg.Acc.TmpScheme)
+		if authHdl == nil {
+			logs.Warn.Println("s.acc: unknown authentication scheme", msg.Acc.TmpScheme, s.sid)
+			s.queueOut(ErrAuthUnknownScheme(msg.Id, "", msg.Timestamp))
+		}
+
 		var err error
-		rec, _, err = store.Store.GetLogicalAuthHandler("token").Authenticate(msg.Acc.Token, s.remoteAddr, msg.Acc.SdkKey)
+		rec, _, err = authHdl.Authenticate(msg.Acc.TmpSecret, s.remoteAddr, msg.Acc.SdkKey)
 		if err != nil {
-			s.queueOut(decodeStoreError(err, msg.Acc.Id, "", msg.Timestamp,
-				map[string]interface{}{"what": "auth"}))
-			logs.Warn.Println("s.acc: invalid token", err, s.sid)
+			s.queueOut(decodeStoreError(err, msg.Acc.Id, msg.Timestamp,
+				map[string]any{"what": "auth"}))
+			logs.Warn.Println("s.acc: invalid temp auth", err, s.sid)
 			return
 		}
 	}
 
-	if strings.HasPrefix(msg.Acc.User, "new") {
+	if newAcc {
 		// New account
 		replyCreateUser(s, msg, rec)
 	} else {
@@ -897,7 +921,7 @@ func (s *Session) login(msg *ClientComMessage) {
 
 	if msg.Login.Scheme == "reset" {
 		if err := s.authSecretReset(msg.Login.Secret); err != nil {
-			s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+			s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp, nil))
 		} else {
 			s.queueOut(InfoAuthReset(msg.Id, msg.Timestamp))
 		}
@@ -920,7 +944,7 @@ func (s *Session) login(msg *ClientComMessage) {
 
 	rec, challenge, err := handler.Authenticate(msg.Login.Secret, s.remoteAddr, msg.Login.SdkKey)
 	if err != nil {
-		resp := decodeStoreError(err, msg.Id, "", msg.Timestamp, nil)
+		resp := decodeStoreError(err, msg.Id, msg.Timestamp, nil)
 		if resp.Ctrl.Code >= 500 {
 			// Log internal errors
 			logs.Warn.Println("s.login: internal", err, s.sid)
@@ -939,7 +963,7 @@ func (s *Session) login(msg *ClientComMessage) {
 
 	if err != nil {
 		logs.Warn.Println("s.login: user state check failed", rec.Uid, err, s.sid)
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp, nil))
 		return
 	}
 
@@ -960,7 +984,7 @@ func (s *Session) login(msg *ClientComMessage) {
 	}
 	if err != nil {
 		logs.Warn.Println("s.login: failed to validate credentials:", err, s.sid)
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp, nil))
 	} else {
 		s.queueOut(s.onLogin(msg.Id, msg.Timestamp, rec, missing))
 	}
@@ -992,7 +1016,8 @@ func (s *Session) authSecretReset(params []byte) error {
 		return err
 	}
 	if uid.IsZero() {
-		return types.ErrNotFound
+		// Prevent discovery of existing contacts: report "no error" if contact is not found.
+		return nil
 	}
 
 	resetParams, err := hdl.GetResetParams(uid)
@@ -1000,27 +1025,27 @@ func (s *Session) authSecretReset(params []byte) error {
 		return err
 	}
 
-	token, _, err := store.Store.GetLogicalAuthHandler("token").GenSecret(&auth.Rec{
-		Uid:       uid,
-		AuthLevel: auth.LevelAuth,
-		Lifetime:  auth.Duration(time.Hour * 24),
-		Features:  auth.FeatureNoLogin,
+	code, _, err := store.Store.GetLogicalAuthHandler("code").GenSecret(&auth.Rec{
+		Uid:        uid,
+		AuthLevel:  auth.LevelAuth,
+		Features:   auth.FeatureNoLogin,
+		Credential: credMethod + ":" + credValue,
 	})
 	if err != nil {
 		return err
 	}
 
-	return validator.ResetSecret(credValue, authScheme, s.lang, token, resetParams)
+	return validator.ResetSecret(credValue, authScheme, s.lang, code, resetParams)
 }
 
 // onLogin performs steps after successful authentication.
 func (s *Session) onLogin(msgID string, timestamp time.Time, rec *auth.Rec, missing []string) *ServerComMessage {
 	var reply *ServerComMessage
-	var params map[string]interface{}
+	var params map[string]any
 
 	features := rec.Features
 
-	params = map[string]interface{}{
+	params = map[string]any{
 		"user":    rec.Uid.UserId(),
 		"authlvl": rec.AuthLevel.String(),
 	}
@@ -1328,7 +1353,7 @@ func (s *Session) expandTopicName(msg *ClientComMessage) (string, *ServerComMess
 	return routeTo, nil
 }
 
-func (s *Session) serializeAndUpdateStats(msg *ServerComMessage) interface{} {
+func (s *Session) serializeAndUpdateStats(msg *ServerComMessage) any {
 	dataSize, data := s.serialize(msg)
 	if dataSize >= 0 {
 		statsAddHistSample("OutgoingMessageSize", float64(dataSize))
@@ -1336,7 +1361,7 @@ func (s *Session) serializeAndUpdateStats(msg *ServerComMessage) interface{} {
 	return data
 }
 
-func (s *Session) serialize(msg *ServerComMessage) (int, interface{}) {
+func (s *Session) serialize(msg *ServerComMessage) (int, any) {
 	if s.proto == GRPC {
 		msg := pbServSerialize(msg)
 		// TODO: calculate and return the size of `msg`.

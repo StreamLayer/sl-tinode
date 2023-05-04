@@ -172,6 +172,11 @@ message ClientAcc {
 	bytes token = 9;
 	// Account state: normal ("ok"), suspended
 	string state = 10;
+	// AuthLevel
+	AuthLevel auth_level = 11;
+	// Temporary auth params for one-off actions like password reset.
+	string tmp_scheme = 12;
+	bytes tmp_secret = 13;
 }
 
 // Login {login} message
@@ -349,6 +354,7 @@ message TopicDesc {
 	int64 state_at = 13;
 	bytes trusted = 14;
 	bool is_chan = 17; // 17!
+	bool online = 18;
 
 	// P2P only: other user's last online timestamp & user agent
 	int64 last_seen_time = 15;
@@ -486,8 +492,9 @@ message ServerMsg {
 		ServerMeta meta = 4;
 		ServerInfo info = 5;
 	}
+	// DEPRECATED. Will be removed soon.
 	// When response is sent to Root, send internal topic name too.
-	string topic = 6;
+	string topic = 6 [deprecated = true];
 }
 
 // Plugin response codes

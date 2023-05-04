@@ -83,9 +83,9 @@ type videoCall struct {
 	// Call message seq ID.
 	seq int
 	// Call message content.
-	content interface{}
+	content any
 	// Call message content mime type.
-	contentMime interface{}
+	contentMime any
 	// Time when the call was accepted.
 	acceptedAt time.Time
 }
@@ -133,26 +133,28 @@ func initVideoCalls(jsconfig json.RawMessage) error {
 		globals.iceServers = config.ICEServers
 	} else if config.ICEServersFile != "" {
 		var iceConfig []iceServer
-		if file, err := os.Open(config.ICEServersFile); err != nil {
+		file, err := os.Open(config.ICEServersFile)
+		if err != nil {
 			return fmt.Errorf("failed to read ICE config: %w", err)
-		} else {
-			jr := jcr.New(file)
-			if err = json.NewDecoder(jr).Decode(&iceConfig); err != nil {
-				switch jerr := err.(type) {
-				case *json.UnmarshalTypeError:
-					lnum, cnum, _ := jr.LineAndChar(jerr.Offset)
-					return fmt.Errorf("unmarshall error in ICE config in %s at %d:%d (offset %d bytes): %w",
-						jerr.Field, lnum, cnum, jerr.Offset, jerr)
-				case *json.SyntaxError:
-					lnum, cnum, _ := jr.LineAndChar(jerr.Offset)
-					return fmt.Errorf("syntax error in config file at %d:%d (offset %d bytes): %w",
-						lnum, cnum, jerr.Offset, jerr)
-				default:
-					return fmt.Errorf("failed to parse config file: %w", err)
-				}
-			}
-			file.Close()
 		}
+
+		jr := jcr.New(file)
+		if err = json.NewDecoder(jr).Decode(&iceConfig); err != nil {
+			switch jerr := err.(type) {
+			case *json.UnmarshalTypeError:
+				lnum, cnum, _ := jr.LineAndChar(jerr.Offset)
+				return fmt.Errorf("unmarshall error in ICE config in %s at %d:%d (offset %d bytes): %w",
+					jerr.Field, lnum, cnum, jerr.Offset, jerr)
+			case *json.SyntaxError:
+				lnum, cnum, _ := jr.LineAndChar(jerr.Offset)
+				return fmt.Errorf("syntax error in config file at %d:%d (offset %d bytes): %w",
+					lnum, cnum, jerr.Offset, jerr)
+			default:
+				return fmt.Errorf("failed to parse config file: %w", err)
+			}
+		}
+		file.Close()
+
 		globals.iceServers = iceConfig
 	}
 
@@ -169,13 +171,20 @@ func initVideoCalls(jsconfig json.RawMessage) error {
 	return nil
 }
 
-func (call *videoCall) messageHead(newState string, duration int) map[string]interface{} {
-	head := map[string]interface{}{
-		"replace": ":" + strconv.Itoa(call.seq),
-		"webrtc":  newState,
+// Add webRTC-related headers to message Head. The original Head may already contain some entries,
+// like 'sender', preserve them.
+func (call *videoCall) messageHead(head map[string]any, newState string, duration int) map[string]any {
+	if head == nil {
+		head = map[string]any{}
 	}
+
+	head["replace"] = ":" + strconv.Itoa(call.seq)
+	head["webrtc"] = newState
+
 	if duration > 0 {
 		head["webrtc-duration"] = duration
+	} else {
+		delete(head, "webrtc-duration")
 	}
 	if call.contentMime != nil {
 		head["mime"] = call.contentMime
@@ -249,8 +258,7 @@ func (t *Topic) handleCallEvent(msg *ClientComMessage) {
 
 	asUid := types.ParseUserId(msg.AsUser)
 
-	_, userFound := t.perUser[asUid]
-	if !userFound {
+	if _, userFound := t.perUser[asUid]; !userFound {
 		// User not found in topic.
 		logs.Warn.Printf("topic[%s]: could not find user %s", t.name, asUid.UserId())
 		return
@@ -280,10 +288,14 @@ func (t *Topic) handleCallEvent(msg *ClientComMessage) {
 		if call.Event == constCallEventAccept {
 			// The call has been accepted.
 			// Send a replacement {data} message to the topic.
-			replaceWith := constCallMsgAccepted
-			head := t.currentCall.messageHead(replaceWith, 0)
 			msgCopy := *msg
 			msgCopy.AsUser = originatorUid.UserId()
+			replaceWith := constCallMsgAccepted
+			var origHead map[string]any
+			if msgCopy.Pub != nil {
+				origHead = msgCopy.Pub.Head
+			} // else fetch the original message from store and use its head.
+			head := t.currentCall.messageHead(origHead, replaceWith, 0)
 			if err := t.saveAndBroadcastMessage(&msgCopy, originatorUid, false, nil,
 				head, t.currentCall.content); err != nil {
 				return
@@ -373,7 +385,7 @@ func (t *Topic) maybeEndCallInProgress(from string, msg *ClientComMessage, callD
 	if from != "" && len(t.currentCall.parties) == 2 {
 		// This is a call in progress.
 		replaceWith = constCallMsgFinished
-		callDuration = time.Now().Sub(t.currentCall.acceptedAt).Milliseconds()
+		callDuration = time.Since(t.currentCall.acceptedAt).Milliseconds()
 	} else {
 		if from != "" {
 			// User originated hang-up.
@@ -396,9 +408,13 @@ func (t *Topic) maybeEndCallInProgress(from string, msg *ClientComMessage, callD
 	}
 
 	// Send a message indicating the call has ended.
-	head := t.currentCall.messageHead(replaceWith, int(callDuration))
 	msgCopy := *msg
 	msgCopy.AsUser = originatorUid.UserId()
+	var origHead map[string]any
+	if msgCopy.Pub != nil {
+		origHead = msgCopy.Pub.Head
+	} // else fetch the original message from store and use its head.
+	head := t.currentCall.messageHead(origHead, replaceWith, int(callDuration))
 	if err := t.saveAndBroadcastMessage(&msgCopy, originatorUid, false, nil, head, t.currentCall.content); err != nil {
 		logs.Err.Printf("topic[%s]: failed to write finalizing message for call seq id %d - '%s'", t.name, t.currentCall.seq, err)
 	}

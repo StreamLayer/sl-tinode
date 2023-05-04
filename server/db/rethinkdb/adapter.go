@@ -34,7 +34,7 @@ const (
 	defaultHost     = "localhost:28015"
 	defaultDatabase = "tinode"
 
-	adpVersion = 112
+	adpVersion = 113
 
 	adapterName = "rethinkdb"
 
@@ -545,6 +545,14 @@ func (a *adapter) UpgradeDb() error {
 	if a.version == 111 {
 		// Just bump the version to keep up with MySQL.
 		if err := bumpVersion(a, 112); err != nil {
+			return err
+		}
+	}
+
+	if a.version == 112 {
+		// Secondary indexes cannot store NULLs, consequently no useful indexes can be created.
+		// Just bump the version.
+		if err := bumpVersion(a, 113); err != nil {
 			return err
 		}
 	}
@@ -1884,7 +1892,7 @@ func (a *adapter) subsDelForUser(user t.Uid, hard bool) error {
 
 // FindUsers returns a list of users who match given tags, such as "email:jdoe@example.com" or "tel:+18003287448".
 // Searching the 'users.Tags' for the given tags using respective index.
-func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string) ([]t.Subscription, error) {
+func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string, activeOnly bool) ([]t.Subscription, error) {
 	index := make(map[string]struct{})
 	allReq := t.FlattenDoubleSlice(req)
 	var allTags []interface{}
@@ -1909,9 +1917,11 @@ func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string) ([]t.Subscr
 	// Get users matched by tags, sort by number of matches from high to low.
 	query := rdb.DB(a.dbName).
 		Table("users").
-		GetAllByIndex("Tags", allTags...).
-		Filter(rdb.Row.Field("State").Eq(t.StateOK)).
-		Pluck("Id", "Access", "CreatedAt", "UpdatedAt", "Public", "Trusted", "Tags").
+		GetAllByIndex("Tags", allTags...)
+	if activeOnly {
+		query = query.Filter(rdb.Row.Field("State").Eq(t.StateOK))
+	}
+	query = query.Pluck("Id", "Access", "CreatedAt", "UpdatedAt", "Public", "Trusted", "Tags").
 		Group("Id").
 		Ungroup().
 		Map(func(row rdb.Term) rdb.Term {
@@ -1968,7 +1978,7 @@ func (a *adapter) FindUsers(uid t.Uid, req [][]string, opt []string) ([]t.Subscr
 
 // FindTopics returns a list of topics with matching tags.
 // Searching the 'topics.Tags' for the given tags using respective index.
-func (a *adapter) FindTopics(req [][]string, opt []string) ([]t.Subscription, error) {
+func (a *adapter) FindTopics(req [][]string, opt []string, activeOnly bool) ([]t.Subscription, error) {
 	index := make(map[string]struct{})
 	var allReq []string
 	for _, el := range req {
@@ -1981,9 +1991,11 @@ func (a *adapter) FindTopics(req [][]string, opt []string) ([]t.Subscription, er
 	}
 	query := rdb.DB(a.dbName).
 		Table("topics").
-		GetAllByIndex("Tags", allTags...).
-		Filter(rdb.Row.Field("State").Eq(t.StateOK)).
-		Pluck("Id", "Access", "CreatedAt", "UpdatedAt", "UseBt", "Public", "Trusted", "Tags").
+		GetAllByIndex("Tags", allTags...)
+	if activeOnly {
+		query = query.Filter(rdb.Row.Field("State").Eq(t.StateOK))
+	}
+	query = query.Pluck("Id", "Access", "CreatedAt", "UpdatedAt", "UseBt", "Public", "Trusted", "Tags").
 		Group("Id").
 		Ungroup().
 		Map(func(row rdb.Term) rdb.Term {
@@ -2775,6 +2787,74 @@ func (a *adapter) decFileUseCounter(msgQuery rdb.Term) error {
 		// Decrement UseCount.
 		Update(map[string]interface{}{"UseCount": rdb.Row.Field("UseCount").Default(1).Sub(1)}).
 		RunWrite(a.conn)
+	return err
+}
+
+// PCacheGet reads a persistet cache entry.
+func (a *adapter) PCacheGet(key string) (string, error) {
+	cursor, err := rdb.DB(a.dbName).Table("kvmeta").Get(key).Field("value").Run(a.conn)
+	if err != nil {
+		return "", err
+	}
+	defer cursor.Close()
+
+	if cursor.IsNil() {
+		return "", t.ErrNotFound
+	}
+
+	var value string
+	if err = cursor.One(&value); err != nil {
+		return "", err
+	}
+
+	return value, nil
+}
+
+// PCacheUpsert creates or updates a persistent cache entry.
+func (a *adapter) PCacheUpsert(key string, value string, failOnDuplicate bool) error {
+	if strings.Contains(key, "^") {
+		// Do not allow ^ in keys: it interferes with Match() query.
+		return t.ErrMalformed
+	}
+
+	doc := map[string]interface{}{
+		"key":   key,
+		"value": value,
+	}
+
+	var action string
+	if failOnDuplicate {
+		action = "error"
+		doc["CreatedAt"] = t.TimeNow()
+	} else {
+		action = "update"
+	}
+
+	_, err := rdb.DB(a.dbName).Table("kvmeta").Insert(doc, rdb.InsertOpts{Conflict: action}).RunWrite(a.conn)
+	if rdb.IsConflictErr(err) {
+		return t.ErrDuplicate
+	}
+
+	return err
+}
+
+// PCacheDelete deletes one persistent cache entry.
+func (a *adapter) PCacheDelete(key string) error {
+	_, err := rdb.DB(a.dbName).Table("kvmeta").Get(key).Delete().RunWrite(a.conn)
+	return err
+}
+
+// PCacheExpire expires old entries with the given key prefix.
+func (a *adapter) PCacheExpire(keyPrefix string, olderThan time.Time) error {
+	if keyPrefix == "" {
+		return t.ErrMalformed
+	}
+
+	_, err := rdb.DB(a.dbName).Table("kvmeta").
+		Filter(rdb.Row.Field("CreatedAt").Lt(olderThan).And(rdb.Row.Field("key").Match("^" + keyPrefix))).
+		Delete().
+		RunWrite(a.conn)
+
 	return err
 }
 

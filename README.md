@@ -1,10 +1,10 @@
 # Tinode Instant Messaging Server
 
-<img src="docs/logo.svg" align="left" width=128 height=128> Instant messaging server. Backend in pure [Go](http://golang.org) (license [GPL 3.0](http://www.gnu.org/licenses/gpl-3.0.en.html)), client-side binding in Java, Javascript, and Swift, as well as [gRPC](https://grpc.io/) client support for C++, C#, Go, Java, Node, PHP, Python, Ruby, Objective-C, etc. (license [Apache 2.0](http://www.apache.org/licenses/LICENSE-2.0)). Wire transport is JSON over websocket (long polling is also available) for custom bindings, or [protobuf](https://developers.google.com/protocol-buffers/) with gRPC. Persistent storage is any one of MySQL, MongoDB or [RethinkDB](http://rethinkdb.com/). Other databases can be supported by writing custom adapters.
+<img src="docs/logo.svg" align="left" width=128 height=128> Instant messaging server. Backend in pure [Go](http://golang.org) (license [GPL 3.0](http://www.gnu.org/licenses/gpl-3.0.en.html)), client-side binding in Java, Javascript, and Swift, as well as [gRPC](https://grpc.io/) client support for C++, C#, Go, Java, Node, PHP, Python, Ruby, Objective-C, etc. (license [Apache 2.0](http://www.apache.org/licenses/LICENSE-2.0)). Wire transport is JSON over websocket (long polling is also available) for custom bindings, or [protobuf](https://developers.google.com/protocol-buffers/) with gRPC.
 
 Tinode is *not* XMPP/Jabber. It is *not* compatible with XMPP. It's meant as a replacement for XMPP. On the surface, it's a lot like open source WhatsApp or Telegram.
 
-Version 0.20. This is beta-quality software: feature-complete and stable but probably with a few bugs or missing features. Follow [instructions](INSTALL.md) to install and run or use one of the cloud services below. Read [API documentation](docs/API.md).
+This is beta-quality software: feature-complete and stable but probably with a few bugs or missing features. Follow [instructions](INSTALL.md) to install and run or use one of the cloud services below. Read [API documentation](docs/API.md).
 
 <a href="https://apps.apple.com/us/app/tinode/id1483763538"><img src="docs/app-store.svg" height=36></a> <a href="https://play.google.com/store/apps/details?id=co.tinode.tindroidx"><img src="docs/play-store.svg" height=36></a> <a href="https://web.tinode.co/"><img src="docs/web-app.svg" height=36></a>
 
@@ -105,14 +105,18 @@ When you register a new account you are asked for an email address to send valid
   * Scriptable [command-line tool](tn-cli/) for server administration.
 * Performance, reliability and development:
   * Sharded clustering with failover.
-  * Storage and out of band transfer of large objects like images or document files using local file system or Amazon S3 (other storage systems can be supported with plugins).
+  * Storage and out of band transfer of large objects like images or document files using local file system or Amazon S3 (other storage systems can be supported with [media handlers](https://github.com/tinode/chat/blob/master/server/media/media.go#L21)).
   * JSON or [protobuf version 3](https://developers.google.com/protocol-buffers/) wire protocols.
   * Bindings for various programming languages:
     * Javascript with no external dependencies.
     * Java with dependencies on [Jackson](https://github.com/FasterXML/jackson) and [Java-Websocket](https://github.com/TooTallNate/Java-WebSocket). Suitable for Android but with no Android SDK dependencies.
     * Swift with no external dependencies.
     * C/C++, C#, Go, Python, PHP, Ruby and many other languages using [gRPC](https://grpc.io/docs/languages/).
-  * Choice of a database backend: MySQL, RethinkDB, MongoDB.
+  * Choice of a database backend. Other databases can be added with by writing [adapters](server/db/adapter.go).
+    * MySQL
+    * PostgreSQL
+    * MongoDB
+    * [RethinkDB](http://rethinkdb.com/)
 
 ### Planned
 
@@ -139,6 +143,7 @@ All client software has support for [internationalization](docs/translations.md)
 | Chinese (traditional) |   | &check; | &check; | &check; |
 | French | &check; | &check; | &check; |   |
 | German |   | &check; | &check; |   |
+| Hindi |   |   | &check; |   |
 | Korean |   | &check; | &check; |   |
 | Portugese | &check; |   | &check; |   |
 | Romanian |   | &check; |   |   |
@@ -146,7 +151,7 @@ All client software has support for [internationalization](docs/translations.md)
 | Spanish | &check; | &check; | &check; | &check; |
 | Vietnamese | &check; |   |   |   |
 
-More translations are [welcome](docs/translations.md). Particularly interested in Arabic, Vietnamese, Persian, Indonesian, Portuguese, Hindi, Bengali, Turkish.
+More translations are [welcome](docs/translations.md). In addition to languages listed above, particularly interested in Arabic, Bengali, Indonesian, Urdu, Japanese, Turkish, Vietnamese, Persian.
 
 ## Third-Party
 
@@ -200,6 +205,7 @@ Words 'chat' and 'instant messaging' in Chinese, Russian, Persian and a few othe
 * 인스턴트 메신저
 * پیام رسان فوری
 * تراسل فوري
+* فوری پیغام رسانی
 * Nhắn tin tức thời
 * anlık mesajlaşma sohbet
 * mensageiro instantâneo
@@ -207,3 +213,4 @@ Words 'chat' and 'instant messaging' in Chinese, Russian, Persian and a few othe
 * mensajería instantánea
 * চ্যাট ইন্সট্যান্ট মেসেজিং
 * चैट त्वरित संदेश
+* তাৎক্ষণিক বার্তা আদান প্রদান

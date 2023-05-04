@@ -287,7 +287,7 @@ func (t *Topic) presUsersOfInterest(what, ua string) {
 				}
 
 				// if notify available, send push to user friends
-				if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && wpNotified != true {
+				if uaPayload["isPrivate"] == false && uaPayload["type"] == "watch_party" && !wpNotified {
 					organizationId := ""
 					// search owner session to resolve organization id
 					for session := range t.sessions {

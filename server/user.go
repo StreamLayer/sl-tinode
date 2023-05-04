@@ -25,7 +25,7 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	// The session cannot authenticate with the new account because  it's already authenticated.
 	if msg.Acc.Login && (!s.uid.IsZero() || rec != nil) {
 		s.queueOut(ErrAlreadyAuthenticated(msg.Id, "", msg.Timestamp))
-		logs.Warn.Println("create user: login requested while authenticated", s.sid)
+		logs.Warn.Println("create user: login requested while authenticated, sid=", s.sid)
 		return
 	}
 
@@ -34,34 +34,34 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	if authhdl == nil {
 		// New accounts must have an authentication scheme
 		s.queueOut(ErrMalformed(msg.Id, "", msg.Timestamp))
-		logs.Warn.Println("create user: unknown auth handler", s.sid)
+		logs.Warn.Println("create user: unknown auth handler, sid=", s.sid)
 		return
 	}
 
 	// Check if login is unique.
 	if ok, err := authhdl.IsUnique(msg.Acc.Secret, s.remoteAddr); !ok {
-		logs.Warn.Println("create user: auth secret is not unique", err, s.sid)
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp,
-			map[string]interface{}{"what": "auth"}))
+		logs.Warn.Println("create user: auth secret is not unique", err, "sid=", s.sid)
+		s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp,
+			map[string]any{"what": "auth"}))
 		return
 	}
 
 	var user types.User
-	var private interface{}
+	var private any
 
 	// If account state is being assigned, make sure the sender is a root user.
 	if msg.Acc.State != "" {
 		if auth.Level(msg.AuthLvl) != auth.LevelRoot {
-			logs.Warn.Println("create user: attempt to set account state by non-root", s.sid)
+			logs.Warn.Println("create user: attempt to set account state by non-root, sid=", s.sid)
 			msg := ErrPermissionDenied(msg.Id, "", msg.Timestamp)
-			msg.Ctrl.Params = map[string]interface{}{"what": "state"}
+			msg.Ctrl.Params = map[string]any{"what": "state"}
 			s.queueOut(msg)
 			return
 		}
 
 		state, err := types.NewObjState(msg.Acc.State)
 		if err != nil || state == types.StateUndefined || state == types.StateDeleted {
-			logs.Warn.Println("create user: invalid account state", err, s.sid)
+			logs.Warn.Println("create user: invalid account state", err, "sid=", s.sid)
 			s.queueOut(ErrMalformed(msg.Id, "", msg.Timestamp))
 			return
 		}
@@ -71,9 +71,9 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	// Ensure tags are unique and not restricted.
 	if tags := normalizeTags(msg.Acc.Tags); tags != nil {
 		if !restrictedTagsEqual(tags, nil, globals.immutableTagNS) {
-			logs.Warn.Println("create user: attempt to directly assign restricted tags", s.sid)
+			logs.Warn.Println("create user: attempt to directly assign restricted tags, sid=", s.sid)
 			msg := ErrPermissionDenied(msg.Id, "", msg.Timestamp)
-			msg.Ctrl.Params = map[string]interface{}{"what": "tags"}
+			msg.Ctrl.Params = map[string]any{"what": "tags"}
 			s.queueOut(msg)
 			return
 		}
@@ -87,9 +87,9 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 		cr := &creds[i]
 		vld := store.Store.GetValidator(cr.Method)
 		if _, err := vld.PreCheck(cr.Value, cr.Params); err != nil {
-			logs.Warn.Println("create user: failed credential pre-check", cr, err, s.sid)
-			s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp,
-				map[string]interface{}{"what": cr.Method}))
+			logs.Warn.Println("create user: failed credential pre-check", cr, err, "sid=", s.sid)
+			s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp,
+				map[string]any{"what": cr.Method}))
 			return
 		}
 	}
@@ -128,7 +128,7 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 
 	// Create user record in the database.
 	if _, err := store.Users.Create(&user, private); err != nil {
-		logs.Warn.Println("create user: failed to create user", err, s.sid)
+		logs.Warn.Println("create user: failed to create user", err, "sid=", s.sid)
 		s.queueOut(ErrUnknown(msg.Id, "", msg.Timestamp))
 		return
 	}
@@ -136,10 +136,12 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	// Add authentication record. The authhdl.AddRecord may change tags.
 	rec, err := authhdl.AddRecord(&auth.Rec{Uid: user.Uid(), Tags: user.Tags}, msg.Acc.Secret, s.remoteAddr)
 	if err != nil {
-		logs.Warn.Println("create user: add auth record failed", err, s.sid)
+		logs.Warn.Println("create user: add auth record failed", err, "sid=", s.sid)
 		// Attempt to delete incomplete user record
-		store.Users.Delete(user.Uid(), false)
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		if err = store.Users.Delete(user.Uid(), true); err != nil {
+			logs.Warn.Println("create user: failed to delete incomplete user record", err, "sid=", s.sid)
+		}
+		s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp, nil))
 		return
 	}
 
@@ -149,10 +151,12 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 		logs.Warn.Println("create user: missing credentials; have:", creds, "want:",
 			globals.authValidators[rec.AuthLevel], s.sid)
 		// Attempt to delete incomplete user record
-		store.Users.Delete(user.Uid(), false)
+		if err = store.Users.Delete(user.Uid(), true); err != nil {
+			logs.Warn.Println("create user: failed to delete incomplete user record", err, "sid=", s.sid)
+		}
 		_, missing, _ := stringSliceDelta(globals.authValidators[rec.AuthLevel], credentialMethods(creds))
-		s.queueOut(decodeStoreError(types.ErrPolicy, msg.Id, "", msg.Timestamp,
-			map[string]interface{}{"creds": missing}))
+		s.queueOut(decodeStoreError(types.ErrPolicy, msg.Id, msg.Timestamp,
+			map[string]any{"creds": missing}))
 		return
 	}
 
@@ -165,15 +169,17 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	validated, _, err := addCreds(user.Uid(), creds, rec.Tags, s.lang, tmpToken)
 	if err != nil {
 		// Delete incomplete user record.
-		store.Users.Delete(user.Uid(), false)
-		logs.Warn.Println("create user: failed to save or validate credential", err, s.sid)
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		logs.Warn.Println("create user: failed to save or validate credential", err, "sid=", s.sid)
+		if err = store.Users.Delete(user.Uid(), true); err != nil {
+			logs.Warn.Println("create user: failed to delete incomplete user record", err, "sid=", s.sid)
+		}
+		s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp, nil))
 		return
 	}
 
 	if msg.Extra != nil && len(msg.Extra.Attachments) > 0 {
 		if err := store.Files.LinkAttachments(user.Uid().UserId(), types.ZeroUid, msg.Extra.Attachments); err != nil {
-			logs.Warn.Println("create user: failed to link avatar attachment", err, s.sid)
+			logs.Warn.Println("create user: failed to link avatar attachment", err, "sid=", s.sid)
 			// This is not a critical error, continue execution.
 		}
 	}
@@ -186,13 +192,13 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	} else {
 		// Not using the new account for logging in.
 		reply = NoErrCreated(msg.Id, "", msg.Timestamp)
-		reply.Ctrl.Params = map[string]interface{}{
+		reply.Ctrl.Params = map[string]any{
 			"user":    user.Uid().UserId(),
 			"authlvl": rec.AuthLevel.String(),
 		}
 	}
 
-	params := reply.Ctrl.Params.(map[string]interface{})
+	params := reply.Ctrl.Params.(map[string]any)
 	params["desc"] = &MsgTopicDesc{
 		CreatedAt: &user.CreatedAt,
 		UpdatedAt: &user.UpdatedAt,
@@ -214,12 +220,12 @@ func replyCreateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 // * Credentials update
 func replyUpdateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	if s.uid.IsZero() && rec == nil {
-		// Session is not authenticated and no token provided.
+		// Session is not authenticated and no temporary auth is provided.
 		logs.Warn.Println("replyUpdateUser: not a new account and not authenticated", s.sid)
 		s.queueOut(ErrPermissionDenied(msg.Id, "", msg.Timestamp))
 		return
 	} else if msg.AsUser != "" && rec != nil {
-		// Two UIDs: one from msg.from, one from token. Ambigous, reject.
+		// Two UIDs: one from msg.from, one from temporary auth. Ambigous, reject.
 		logs.Warn.Println("replyUpdateUser: got both authenticated session and token", s.sid)
 		s.queueOut(ErrMalformed(msg.Id, "", msg.Timestamp))
 		return
@@ -264,11 +270,11 @@ func replyUpdateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 	}
 	if err != nil {
 		logs.Warn.Println("replyUpdateUser: failed to fetch user from DB", err, s.sid)
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp, nil))
 		return
 	}
 
-	var params map[string]interface{}
+	var params map[string]any
 	if msg.Acc.Scheme != "" {
 		err = updateUserAuth(msg, user, rec, s.remoteAddr)
 	} else if len(msg.Acc.Cred) > 0 {
@@ -294,7 +300,7 @@ func replyUpdateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 				}
 				_, missing, _ := stringSliceDelta(globals.authValidators[authLvl], validated)
 				if len(missing) > 0 {
-					params = map[string]interface{}{"cred": missing}
+					params = map[string]any{"cred": missing}
 				}
 			}
 		}
@@ -311,7 +317,7 @@ func replyUpdateUser(s *Session, msg *ClientComMessage, rec *auth.Rec) {
 
 	if err != nil {
 		logs.Warn.Println("replyUpdateUser: failed to update user", err, s.sid)
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp, nil))
 		return
 	}
 
@@ -356,8 +362,8 @@ func addCreds(uid types.Uid, creds []MsgCredClient, extraTags []string,
 	for i := range creds {
 		cr := &creds[i]
 		vld := store.Store.GetValidator(cr.Method)
-		if vld == nil {
-			// Ignore unknown validator.
+		if vld == nil || !vld.IsInitialized() {
+			// Ignore unknown or un-initialized validator.
 			continue
 		}
 
@@ -589,6 +595,13 @@ func replyDelUser(s *Session, msg *ClientComMessage) {
 	var uid types.Uid
 
 	if msg.Del.User == "" || msg.Del.User == s.uid.UserId() {
+		// Check if account deletion is disabled.
+		if globals.permanentAccounts && s.authLvl != auth.LevelRoot {
+			logs.Warn.Println("replyDelUser: account deletion disabled", s.sid)
+			s.queueOut(ErrPolicy(msg.Id, "", msg.Timestamp))
+			return
+		}
+
 		// Delete current user.
 		uid = s.uid
 	} else if s.authLvl == auth.LevelRoot {
@@ -658,7 +671,7 @@ func replyDelUser(s *Session, msg *ClientComMessage) {
 	// Delete user's records from the database.
 	if err := store.Users.Delete(uid, msg.Del.Hard); err != nil {
 		logs.Warn.Println("replyDelUser: failed to delete user", err, s.sid)
-		s.queueOut(decodeStoreError(err, msg.Id, "", msg.Timestamp, nil))
+		s.queueOut(decodeStoreError(err, msg.Id, msg.Timestamp, nil))
 		return
 	}
 
@@ -760,14 +773,14 @@ func (pq pendingReceiptsQueue) Swap(i, j int) {
 	pq[j].index = j
 }
 
-func (pq *pendingReceiptsQueue) Push(x interface{}) {
+func (pq *pendingReceiptsQueue) Push(x any) {
 	n := len(*pq)
 	item := x.(*pendingReceipt)
 	item.index = n
 	*pq = append(*pq, item)
 }
 
-func (pq *pendingReceiptsQueue) Pop() interface{} {
+func (pq *pendingReceiptsQueue) Pop() any {
 	old := *pq
 	n := len(old)
 	item := old[n-1]
@@ -956,10 +969,12 @@ func usersRequestFromCluster(req *UserCacheReq) {
 	}
 }
 
+var usersCache map[types.Uid]userCacheEntry
+
 // The go routine for processing updates to users cache.
 func userUpdater() {
 	// Caches unread counters and numbers of topics the user's subscribed to.
-	usersCache := make(map[types.Uid]userCacheEntry)
+	usersCache = make(map[types.Uid]userCacheEntry)
 
 	// Unread counter updates blocked by IO on per user basis. We flush them when the IO completes.
 	perUserBuffers := make(map[types.Uid][]bufferedUpdate)
@@ -974,10 +989,10 @@ func userUpdater() {
 	// IO callback queue.
 	ioDone := make(chan *ioResult, 1024)
 
-	unreadUpdater := func(uids []types.Uid, val int, inc bool) map[types.Uid]int {
+	unreadUpdater := func(uids []types.Uid, vals []int, inc bool) map[types.Uid]int {
 		var dbPending []types.Uid
 		counts := make(map[types.Uid]int, len(uids))
-		for _, uid := range uids {
+		for i, uid := range uids {
 			counts[uid] = 0
 			uce, ok := usersCache[uid]
 			if !ok {
@@ -986,6 +1001,7 @@ func userUpdater() {
 				continue
 			}
 
+			val := vals[i]
 			if uce.unread < 0 {
 				// Unread counter not initialized yet. Maybe start a DB read?
 				if updateBuf, ioInProgress := perUserBuffers[uid]; ioInProgress {
@@ -1104,19 +1120,19 @@ func userUpdater() {
 			if upd.PushRcpt != nil {
 				// List of uids for which the unread count is being read from the DB.
 				pendingUsers := []types.Uid{}
+
 				allUids := make([]types.Uid, 0, len(upd.PushRcpt.To))
-				for uid := range upd.PushRcpt.To {
+				allDeltas := make([]int, 0, len(upd.PushRcpt.To))
+				for uid, r := range upd.PushRcpt.To {
 					allUids = append(allUids, uid)
+					delta := 0
+					if r.ShouldIncrementUnreadCountInCache {
+						delta = 1
+					}
+					allDeltas = append(allDeltas, delta)
 				}
 
-				var delta int
-				// Increment unread counter only on msg event.
-				if upd.PushRcpt.Payload.What == "msg" {
-					delta = 1
-				} else {
-					delta = 0
-				}
-				allUnread := unreadUpdater(allUids, delta, true)
+				allUnread := unreadUpdater(allUids, allDeltas, true)
 				for uid, unread := range allUnread {
 					rcptTo := upd.PushRcpt.To[uid]
 					// Handle update
@@ -1185,7 +1201,7 @@ func userUpdater() {
 			}
 
 			// Request to update unread count for one user.
-			unreadUpdater([]types.Uid{upd.UserId}, upd.Unread, upd.Inc)
+			unreadUpdater([]types.Uid{upd.UserId}, []int{upd.Unread}, upd.Inc)
 		}
 	}
 
