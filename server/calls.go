@@ -373,7 +373,7 @@ func (t *Topic) maybeEndCallInProgress(from string, msg *ClientComMessage, callD
 	if from != "" && len(t.currentCall.parties) == 2 {
 		// This is a call in progress.
 		replaceWith = constCallMsgFinished
-		callDuration = time.Now().Sub(t.currentCall.acceptedAt).Milliseconds()
+		callDuration = time.Since(t.currentCall.acceptedAt).Milliseconds()
 	} else {
 		if from != "" {
 			// User originated hang-up.

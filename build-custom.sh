@@ -5,7 +5,7 @@ set -ex
 ### builds custom image for makeomatic purposes
 # usage "./build-custom.sh tag=v0.15.9"
 goplat=( linux )
-goarc=( amd64 )
+goarc=( $PLATFORM )
 dbtags=( mongodb )
 releasepath="./docker/tinode/releases"
 repository="gcr.io/peak-orbit-214114"
@@ -33,9 +33,6 @@ git submodule update --init --recursive
 rm -fR ${releasepath}/${version}
 mkdir -p ${releasepath}/${version}
 
-if [[ ! -x "$GOPATH/bin/gox" ]]; then
-  go get github.com/mitchellh/gox
-fi
 
 for plat in "${goplat[@]}"
 do
@@ -46,10 +43,10 @@ do
     rm -f $GOPATH/bin/keygen
 
     # Build
-    $GOPATH/bin/gox -osarch="${plat}/${arc}" \
+    env GOOS=${plat} GOARCH=${arc} go build -o $GOPATH/bin/keygen \
       -ldflags "-s -w -extldflags \"-fno-PIC -static\"" \
       -tags 'osusergo netgo static_build' \
-      -output $GOPATH/bin/keygen ./keygen > /dev/null
+      ./keygen > /dev/null
 
     for dbtag in "${dbtags[@]}"
     do
@@ -61,15 +58,15 @@ do
       rm -f $GOPATH/bin/init-db
 
       # Build tinode server and database initializer for RethinkDb and MySQL.
-      $GOPATH/bin/gox -osarch="${plat}/${arc}" \
+      env GOOS=${plat} GOARCH=${arc} CGO_ENABLED=1 go build -o $GOPATH/bin/tinode -race \
         -ldflags "-s -w -extldflags \"-fno-PIC -static\" -X main.buildstamp=${version}" \
         -tags "${dbtag} osusergo netgo static_build" \
-        -output $GOPATH/bin/tinode ./server > /dev/null
+        ./server > /dev/null
 
-      $GOPATH/bin/gox -osarch="${plat}/${arc}" \
+      env GOOS=${plat} GOARCH=${arc} go build  \
         -ldflags "-s -w -extldflags \"-fno-PIC -static\"" \
         -tags "${dbtag} osusergo netgo static_build" \
-        -output $GOPATH/bin/init-db ./tinode-db > /dev/null
+        -o $GOPATH/bin/init-db ./tinode-db > /dev/null
 
       # Tar on Mac is inflexible about directories. Let's just copy release files to
       # one directory.
@@ -120,17 +117,17 @@ do
   done
 done
 
-for dbtag in "${dbtags[@]}"
-do
-  rmitags="${repository}/tinode-${dbtag}:${version}"
+# for dbtag in "${dbtags[@]}"
+# do
+#   rmitags="${repository}/tinode-${dbtag}:${version}"
 
-  if [ x"$push" = x"true" ]; then
-    docker rmi ${rmitags} -f
-  fi
+#   if [ x"$push" = x"true" ]; then
+#     docker rmi ${rmitags} -f
+#   fi
 
-  docker build --build-arg VERSION=$version --build-arg TARGET_DB=${dbtag} --tag ${rmitags} docker/tinode
+#   docker build --build-arg VERSION=$version --build-arg TARGET_DB=${dbtag} --tag ${rmitags} docker/tinode
 
-  if [ x"$push" = x"true" ]; then
-    docker push $rmitags
-  fi
-done
+#   if [ x"$push" = x"true" ]; then
+#     docker push $rmitags
+#   fi
+# done
