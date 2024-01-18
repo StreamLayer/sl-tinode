@@ -1,3 +1,17 @@
+# syntax=docker/dockerfile:1
+
+FROM golang:1.21-alpine as build
+
+ARG TARGETARCH
+ARG TARGETOS
+ARG VERSION
+
+WORKDIR /src
+COPY . .
+
+RUN apk --update --upgrade add bash git gcc musl-dev \
+	&& ./build-custom.sh tag=v${VERSION} push=false releasepath=/src/releases
+
 # Docker file builds an image with a tinode chat server.
 #
 # In order to run the image you have to link it to a running database container. For example, to
@@ -9,11 +23,14 @@
 #	--env AUTH_TOKEN_KEY=base64+encoded+32+bytes \
 #	tinode-server
 
-FROM alpine:3.17
+FROM alpine:3.19
 
+ARG TARGETARCH
+ARG TARGETOS
 ARG VERSION=0.21
-ENV VERSION=$VERSION
 ARG BINVERS=$VERSION
+
+ENV VERSION=$VERSION
 
 LABEL maintainer="Tinode Team <info@tinode.co>"
 LABEL name="TinodeChatServer"
@@ -127,22 +144,18 @@ RUN apk update && \
 WORKDIR /opt/tinode
 
 # Get the desired Tinode build.
-ADD ./releases/$VERSION .
+COPY --from=build /src/releases/$VERSION .
 
 # Unpack the Tinode archive.
-RUN tar -xzf tinode-$TARGET_DB.linux-amd64.tar.gz \
-	&& rm tinode-$TARGET_DB.linux-amd64.tar.gz
+RUN tar -xzf tinode-$TARGET_DB.${TARGETOS}-${TARGETARCH}.tar.gz \
+	&& rm tinode-$TARGET_DB.${TARGETOS}-${TARGETARCH}.tar.gz \
+	&& mkdir /botdata
 
 # Copy config template to the container.
-COPY config.template .
-COPY entrypoint.sh .
-
-# Create directory for chatbot data.
-RUN mkdir /botdata
+COPY --from=build /src/docker/tinode/config.template /src/docker/tinode/entrypoint.sh ./
 
 # Make scripts runnable
-RUN chmod +x entrypoint.sh
-RUN chmod +x credentials.sh
+RUN chmod +x entrypoint.sh credentials.sh
 
 # Generate config from template and run the server.
 ENTRYPOINT ./entrypoint.sh
