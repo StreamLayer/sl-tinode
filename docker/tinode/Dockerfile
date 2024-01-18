@@ -1,16 +1,16 @@
 # syntax=docker/dockerfile:1
-ARG PLATFORM
 
-FROM --platform=$PLATFORM golang:1.21 as build
+FROM golang:1.21-alpine as build
 
+ARG TARGETARCH
+ARG TARGETOS
 ARG VERSION
-ARG PLATFORM
 
 WORKDIR /src
 COPY . .
 
-ENV PLATFORM=${PLATFORM}
-RUN ./build-custom.sh tag=v${VERSION} push=false releasepath=/src/releases
+RUN apk --update --upgrade add bash git gcc musl-dev \
+	&& ./build-custom.sh tag=v${VERSION} push=false releasepath=/src/releases
 
 # Docker file builds an image with a tinode chat server.
 #
@@ -23,12 +23,14 @@ RUN ./build-custom.sh tag=v${VERSION} push=false releasepath=/src/releases
 #	--env AUTH_TOKEN_KEY=base64+encoded+32+bytes \
 #	tinode-server
 
-FROM --platform=${PLATFORM} alpine:3.19
+FROM alpine:3.19
 
-ARG PLATFORM
+ARG TARGETARCH
+ARG TARGETOS
 ARG VERSION=0.21
-ENV VERSION=$VERSION
 ARG BINVERS=$VERSION
+
+ENV VERSION=$VERSION
 
 LABEL maintainer="Tinode Team <info@tinode.co>"
 LABEL name="TinodeChatServer"
@@ -145,8 +147,8 @@ WORKDIR /opt/tinode
 COPY --from=build /src/releases/$VERSION .
 
 # Unpack the Tinode archive.
-RUN tar -xzf tinode-$TARGET_DB.linux-${PLATFORM}.tar.gz \
-	&& rm tinode-$TARGET_DB.linux-${PLATFORM}.tar.gz \
+RUN tar -xzf tinode-$TARGET_DB.${TARGETOS}-${TARGETARCH}.tar.gz \
+	&& rm tinode-$TARGET_DB.${TARGETOS}-${TARGETARCH}.tar.gz \
 	&& mkdir /botdata
 
 # Copy config template to the container.

@@ -4,11 +4,9 @@ set -ex
 
 ### builds custom image for makeomatic purposes
 # usage "./build-custom.sh tag=v0.15.9"
-goplat=( linux )
-goarc=( $PLATFORM )
+goplat=( $TARGETOS )
+goarc=( $TARGETARCH )
 dbtags=( mongodb )
-releasepath="./docker/tinode/releases"
-repository="gcr.io/peak-orbit-214114"
 
 export GOPATH=`go env GOPATH`
 
@@ -18,6 +16,8 @@ done
 
 version=${tag#?}
 push=${push:-true}
+releasepath=${releasepath:-"./docker/tinode/releases"}
+repository=${repository:-"gcr.io/peak-orbit-214114"}
 
 if [ -z "$version" ]; then
     echo "Must provide tag as 'tag=v1.2.3'"
@@ -97,20 +97,15 @@ do
       cp ./tinode-db/credentials.sh ${tmppath}
 
       # Build archive. All platforms but Windows use tar for archiving. Windows uses zip.
-      plat2=$plat
-      # Rename 'darwin' tp 'mac'
-      if [ "$plat" = "darwin" ]; then
-        plat2=mac
-      fi
       # Copy binaries
       cp $GOPATH/bin/tinode ${tmppath}
       cp $GOPATH/bin/init-db ${tmppath}
       cp $GOPATH/bin/keygen ${tmppath}
 
       # Remove possibly existing archive.
-      rm -f ${releasepath}/${version}/tinode-${dbtag}."${plat2}-${arc}".tar.gz
+      rm -f ${releasepath}/${version}/tinode-${dbtag}."${plat}-${arc}".tar.gz
       # Generate a new one
-      tar -C ${tmppath} -zcf ${releasepath}/${version}/tinode-${dbtag}."${plat2}-${arc}".tar.gz .
+      tar -C ${tmppath} -zcf ${releasepath}/${version}/tinode-${dbtag}."${plat}-${arc}".tar.gz .
 
       rm -fR ${tmppath}
     done
