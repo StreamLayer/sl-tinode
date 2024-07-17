@@ -337,7 +337,7 @@ message TopicSub {
 	int64 deleted_at = 2;
 	int64 created_at = 17;
 
-	optional bool online = 3;
+	bool online = 3;
 
 	AccessMode acs = 4;
 	int32 read_id = 5;
